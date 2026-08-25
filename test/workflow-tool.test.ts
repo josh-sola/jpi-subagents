@@ -14,7 +14,7 @@
  * those are what these assertions are about — the mapping is.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initTheme } from "@earendil-works/pi-coding-agent";
@@ -24,6 +24,7 @@ import { SUBAGENT_TOOL_NAMES } from "../src/agent-runner.js";
 import { NO_FALLBACK, registerAgents, setFallbackSubagent } from "../src/agent-types.js";
 import subagentsExtension, { WORKFLOW_ENTRY_TYPE, WORKFLOW_FILE_FLAG } from "../src/index.js";
 import { isScopeModelsEnabled, setScopeModelsEnabled } from "../src/model-scope.js";
+import { createSubagentsConfig, loadSubagentsSettings } from "../src/settings.js";
 import type { AgentRecord } from "../src/types.js";
 import { createWorkflowHost } from "../src/workflow/host.js";
 import { compileJsonSchema } from "../src/workflow/json-schema.js";
@@ -640,11 +641,11 @@ describe("SubagentWorkflow tool — script vs scriptPath vs name", () => {
   let booted: ReturnType<typeof makePi>;
   let tools: Map<string, any>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // Hermetic dir first — settings and agent files are read at boot.
     hermetic = hermeticDir({ settings: { schedulingEnabled: false, workflowsEnabled: true } });
     booted = makePi();
-    subagentsExtension(booted.pi);
+    await subagentsExtension(booted.pi);
     tools = booted.tools;
   });
 
@@ -711,9 +712,9 @@ describe("SubagentWorkflow tool — script vs scriptPath vs name", () => {
     expect(textOf(result)).toMatch(/Provide `script`.*`scriptPath`.*or `name`/s);
   });
 
-  it("runs a saved workflow by name from .pi/workflows", async () => {
-    mkdirSync(join(hermetic.dir, ".pi", "workflows"), { recursive: true });
-    writeFileSync(join(hermetic.dir, ".pi", "workflows", "nightly.js"), fileScript);
+  it("runs a saved workflow by name from .agents/workflows", async () => {
+    mkdirSync(join(hermetic.dir, ".agents", "workflows"), { recursive: true });
+    writeFileSync(join(hermetic.dir, ".agents", "workflows", "nightly.js"), fileScript);
 
     const result = await tools.get("SubagentWorkflow").execute(
       "tc-name-1",
@@ -724,12 +725,12 @@ describe("SubagentWorkflow tool — script vs scriptPath vs name", () => {
     const text = textOf(result);
     expect(text).toMatch(/Workflow "from-file" started/);
     // Reported as its own file, so editing and re-running works on a saved one.
-    expect(text).toContain(join(".pi", "workflows", "nightly.js"));
+    expect(text).toContain(join(".agents", "workflows", "nightly.js"));
   });
 
   it("lets script and scriptPath both outrank name", async () => {
-    mkdirSync(join(hermetic.dir, ".pi", "workflows"), { recursive: true });
-    writeFileSync(join(hermetic.dir, ".pi", "workflows", "nightly.js"), fileScript);
+    mkdirSync(join(hermetic.dir, ".agents", "workflows"), { recursive: true });
+    writeFileSync(join(hermetic.dir, ".agents", "workflows", "nightly.js"), fileScript);
 
     const viaScript = await tools.get("SubagentWorkflow").execute(
       "tc-name-2",
@@ -740,8 +741,8 @@ describe("SubagentWorkflow tool — script vs scriptPath vs name", () => {
   });
 
   it("names the saved workflows it does have when the name is unknown", async () => {
-    mkdirSync(join(hermetic.dir, ".pi", "workflows"), { recursive: true });
-    writeFileSync(join(hermetic.dir, ".pi", "workflows", "nightly.js"), fileScript);
+    mkdirSync(join(hermetic.dir, ".agents", "workflows"), { recursive: true });
+    writeFileSync(join(hermetic.dir, ".agents", "workflows", "nightly.js"), fileScript);
 
     const result = await tools.get("SubagentWorkflow").execute(
       "tc-name-3",
@@ -768,8 +769,8 @@ describe("SubagentWorkflow tool — script vs scriptPath vs name", () => {
     expect(textOf(fromGlobal)).toMatch(/Workflow "from-file" started/);
 
     // Same name in the project wins — .pi stays the project authority.
-    mkdirSync(join(hermetic.dir, ".pi", "workflows"), { recursive: true });
-    writeFileSync(join(hermetic.dir, ".pi", "workflows", "shared.js"), inlineScript);
+    mkdirSync(join(hermetic.dir, ".agents", "workflows"), { recursive: true });
+    writeFileSync(join(hermetic.dir, ".agents", "workflows", "shared.js"), inlineScript);
 
     const fromProject = await tools.get("SubagentWorkflow").execute(
       "tc-name-7",
@@ -782,8 +783,8 @@ describe("SubagentWorkflow tool — script vs scriptPath vs name", () => {
   it("refuses a file in the folder that is not a workflow", async () => {
     // These are ordinary directories — a build artifact or a scratch script can
     // sit next to the workflows, and naming one must not run it.
-    mkdirSync(join(hermetic.dir, ".pi", "workflows"), { recursive: true });
-    writeFileSync(join(hermetic.dir, ".pi", "workflows", "utils.js"), "module.exports = { helper: 1 };\n");
+    mkdirSync(join(hermetic.dir, ".agents", "workflows"), { recursive: true });
+    writeFileSync(join(hermetic.dir, ".agents", "workflows", "utils.js"), "module.exports = { helper: 1 };\n");
 
     const result = await tools.get("SubagentWorkflow").execute(
       "tc-shape-1",
@@ -799,9 +800,9 @@ describe("SubagentWorkflow tool — script vs scriptPath vs name", () => {
 
   it("leaves non-workflow files out of the listing entirely", async () => {
     // Offering `utils.js` as a runnable workflow is what invites trying it.
-    mkdirSync(join(hermetic.dir, ".pi", "workflows"), { recursive: true });
-    writeFileSync(join(hermetic.dir, ".pi", "workflows", "utils.js"), "const x = 1;\n");
-    writeFileSync(join(hermetic.dir, ".pi", "workflows", "nightly.js"), fileScript);
+    mkdirSync(join(hermetic.dir, ".agents", "workflows"), { recursive: true });
+    writeFileSync(join(hermetic.dir, ".agents", "workflows", "utils.js"), "const x = 1;\n");
+    writeFileSync(join(hermetic.dir, ".agents", "workflows", "nightly.js"), fileScript);
 
     const result = await tools.get("SubagentWorkflow").execute(
       "tc-shape-2",
@@ -821,8 +822,8 @@ describe("SubagentWorkflow tool — script vs scriptPath vs name", () => {
     const globalDir = join(process.env.PI_CODING_AGENT_DIR!, "workflows");
     mkdirSync(globalDir, { recursive: true });
     writeFileSync(join(globalDir, "shared.js"), fileScript);
-    mkdirSync(join(hermetic.dir, ".pi", "workflows"), { recursive: true });
-    writeFileSync(join(hermetic.dir, ".pi", "workflows", "shared.js"), "// not a workflow\n");
+    mkdirSync(join(hermetic.dir, ".agents", "workflows"), { recursive: true });
+    writeFileSync(join(hermetic.dir, ".agents", "workflows", "shared.js"), "// not a workflow\n");
 
     const result = await tools.get("SubagentWorkflow").execute(
       "tc-shape-3",
@@ -1059,7 +1060,7 @@ describe("--subagents-workflow-file", () => {
     // lifecycle callbacks no longer refresh the fleet — and nothing else did,
     // which left a running workflow invisible in FleetView.
     const booted = makePi();
-    subagentsExtension(booted.pi);
+    await subagentsExtension(booted.pi);
     const context = uiCtx();
     await booted.lifecycle.get("session_start")?.({}, context);
     context.ui.setWidget.mockClear();
@@ -1074,11 +1075,11 @@ describe("--subagents-workflow-file", () => {
     expect(keys, "the run has to claim its row before its first agent starts").toContain("fleet");
   });
 
-  it("captures the UI at session_start, before any tool has executed", () => {
+  it("captures the UI at session_start, before any tool has executed", async () => {
     // A flag-launched workflow runs from session_start, so a UI captured only
     // from tool_execution_start would leave it with no widget and no fleet row.
     const booted = makePi();
-    subagentsExtension(booted.pi);
+    await subagentsExtension(booted.pi);
     const context = uiCtx();
 
     booted.lifecycle.get("session_start")?.({}, context);
@@ -1086,9 +1087,9 @@ describe("--subagents-workflow-file", () => {
     expect(context.ui.onTerminalInput, "the fleet list only hooks input once it has a UI").toHaveBeenCalled();
   });
 
-  it("registers the flag at activation but does not read it there", () => {
+  it("registers the flag at activation but does not read it there", async () => {
     const booted = makePi({ [WORKFLOW_FILE_FLAG]: "ignored-at-activation.js" });
-    subagentsExtension(booted.pi);
+    await subagentsExtension(booted.pi);
 
     expect(booted.registeredFlags.get(WORKFLOW_FILE_FLAG)).toMatchObject({ type: "string" });
     // The host applies CLI values only AFTER every extension factory has run, so
@@ -1100,7 +1101,7 @@ describe("--subagents-workflow-file", () => {
     const path = join(hermetic.dir, "flow.js");
     writeFileSync(path, fileScript);
     const booted = makePi({ [WORKFLOW_FILE_FLAG]: path });
-    subagentsExtension(booted.pi);
+    await subagentsExtension(booted.pi);
 
     await booted.lifecycle.get("session_start")?.({}, uiCtx());
 
@@ -1109,7 +1110,7 @@ describe("--subagents-workflow-file", () => {
 
   it("explains the `=` form when the flag arrives bare as boolean true", async () => {
     const booted = makePi({ [WORKFLOW_FILE_FLAG]: true });
-    subagentsExtension(booted.pi);
+    await subagentsExtension(booted.pi);
     const context = uiCtx();
 
     await booted.lifecycle.get("session_start")?.({}, context);
@@ -1121,7 +1122,7 @@ describe("--subagents-workflow-file", () => {
 
   it("does nothing at all when the flag was not passed", async () => {
     const booted = makePi();
-    subagentsExtension(booted.pi);
+    await subagentsExtension(booted.pi);
     const context = uiCtx();
 
     await booted.lifecycle.get("session_start")?.({}, context);
@@ -1133,7 +1134,7 @@ describe("--subagents-workflow-file", () => {
 
   it("reports a script it cannot read without starting a run", async () => {
     const booted = makePi({ [WORKFLOW_FILE_FLAG]: join(hermetic.dir, "absent.js") });
-    subagentsExtension(booted.pi);
+    await subagentsExtension(booted.pi);
     const context = uiCtx();
 
     await booted.lifecycle.get("session_start")?.({}, context);
@@ -1147,7 +1148,7 @@ describe("--subagents-workflow-file", () => {
     const path = join(hermetic.dir, "flow.js");
     writeFileSync(path, `${fileScript}log("scanned");\nreturn "all clear";\n`);
     const booted = makePi({ [WORKFLOW_FILE_FLAG]: path });
-    subagentsExtension(booted.pi);
+    await subagentsExtension(booted.pi);
 
     await booted.lifecycle.get("session_start")?.({}, uiCtx());
     await vi.waitFor(
@@ -1170,7 +1171,7 @@ describe("--subagents-workflow-file", () => {
 
   it("renders the persisted entry through the shared workflow card layout", async () => {
     const booted = makePi();
-    subagentsExtension(booted.pi);
+    await subagentsExtension(booted.pi);
     const renderer = booted.entryRenderers.get(WORKFLOW_ENTRY_TYPE);
     expect(renderer, "a custom entry with no renderer is silently dropped by the host").toBeTruthy();
 
@@ -1225,35 +1226,35 @@ describe("workflowsEnabled — the master switch", () => {
     });
 
   /** Boot the extension against a project whose settings say `settings`. */
-  const boot = (settings: Record<string, unknown>, flags: Record<string, string | boolean> = {}) => {
+  const boot = async (settings: Record<string, unknown>, flags: Record<string, string | boolean> = {}) => {
     hermetic = hermeticDir({ settings });
     const booted = makePi(flags);
-    subagentsExtension(booted.pi);
+    await subagentsExtension(booted.pi);
     return booted;
   };
 
-  it("is on with no setting at all", () => {
-    const booted = boot({});
+  it("is on with no setting at all", async () => {
+    const booted = await boot({});
 
     expect(booted.tools.has("SubagentWorkflow")).toBe(true);
     // Nothing else is affected.
     expect(booted.tools.has("Agent")).toBe(true);
   });
 
-  it("stays off when the setting says so explicitly", () => {
+  it("stays off when the setting says so explicitly", async () => {
     // Not registered at all: the model is never told the feature exists. The
     // switch buys zero tool-spec tokens, which a refusing tool would not.
-    expect(boot({ workflowsEnabled: false }).tools.has("SubagentWorkflow")).toBe(false);
+    expect((await boot({ workflowsEnabled: false })).tools.has("SubagentWorkflow")).toBe(false);
   });
 
-  it("registers the tool once the setting turns it on", () => {
-    expect(boot({ workflowsEnabled: true }).tools.has("SubagentWorkflow")).toBe(true);
+  it("registers the tool once the setting turns it on", async () => {
+    expect((await boot({ workflowsEnabled: true })).tools.has("SubagentWorkflow")).toBe(true);
   });
 
   it("refuses the startup flag while off, instead of running the script anyway", async () => {
     // The flag is the same machinery by another door, so the switch has to
     // close it too — and say why, rather than appearing to do nothing.
-    const booted = boot({ workflowsEnabled: false });
+    const booted = await boot({ workflowsEnabled: false });
     const path = join(hermetic.dir, "flow.js");
     writeFileSync(path, fileScript);
     booted.pi.getFlag.mockReturnValue(path);
@@ -1281,10 +1282,10 @@ describe("collisions with another extension", () => {
     vi.restoreAllMocks();
   });
 
-  const boot = (settings: Record<string, unknown> = { workflowsEnabled: true }) => {
+  const boot = async (settings: Record<string, unknown> = { workflowsEnabled: true }) => {
     hermetic = hermeticDir({ settings });
     const booted = makePi();
-    subagentsExtension(booted.pi);
+    await subagentsExtension(booted.pi);
     return booted;
   };
 
@@ -1304,7 +1305,7 @@ describe("collisions with another extension", () => {
   it("warns when another extension already owns the tool name", async () => {
     // Pi keeps the FIRST registration per tool name, across extensions. Ours
     // never reaches the registry, and nothing in pi says so.
-    const booted = boot();
+    const booted = await boot();
     booted.pi.getAllTools.mockReturnValue([
       {
         name: "SubagentWorkflow",
@@ -1321,7 +1322,7 @@ describe("collisions with another extension", () => {
   });
 
   it("stays quiet when the registered tool is our own", async () => {
-    const booted = boot();
+    const booted = await boot();
     const ours = booted.tools.get("SubagentWorkflow");
     booted.pi.getAllTools.mockReturnValue([
       { name: "SubagentWorkflow", description: ours.description, sourceInfo: { source: "pi-subagents" } },
@@ -1336,7 +1337,7 @@ describe("collisions with another extension", () => {
   it("does not check the tool name while workflows are off", async () => {
     // Nothing of ours is registered, so another extension owning the name is
     // simply not our business to complain about.
-    const booted = boot({ workflowsEnabled: false });
+    const booted = await boot({ workflowsEnabled: false });
     booted.pi.getAllTools.mockReturnValue([
       { name: "SubagentWorkflow", description: "someone else's", sourceInfo: { source: "other-ext" } },
     ]);
@@ -1350,7 +1351,7 @@ describe("collisions with another extension", () => {
   it("survives a host where the listing methods are unavailable", async () => {
     // print mode and RPC mode do not bind them; a diagnostic must not be the
     // thing that takes the session down.
-    const booted = boot();
+    const booted = await boot();
     booted.pi.getAllTools.mockImplementation(() => {
       throw new Error("Extension runtime not initialized.");
     });
@@ -1369,7 +1370,7 @@ describe("collisions with another extension", () => {
    * ----------------------------------------------------------------------- */
 
   /** Boot with no `workflowsEnabled` at all — on by default, and unpinned. */
-  const bootAuto = () => boot({});
+  const bootAuto = async () => boot({});
 
   const foreign = (name: string, source = "other-ext") => ({
     name,
@@ -1378,7 +1379,7 @@ describe("collisions with another extension", () => {
   });
 
   it("withdraws its tool when another extension provides a `Workflow` tool", async () => {
-    const booted = bootAuto();
+    const booted = await bootAuto();
     // Registered, because the collision is only visible after every extension
     // has loaded — which is after ours registered.
     expect(booted.tools.has("SubagentWorkflow")).toBe(true);
@@ -1399,20 +1400,20 @@ describe("collisions with another extension", () => {
   });
 
   it("names the setting that keeps both", async () => {
-    const booted = bootAuto();
+    const booted = await bootAuto();
     booted.pi.getAllTools.mockReturnValue([foreign("Workflow")]);
     const context = uiContext();
 
     await booted.lifecycle.get("session_start")?.({}, context);
 
-    expect(warnings(context).some(m => /workflowsEnabled/.test(m))).toBe(true);
+    expect(warnings(context).some(m => /workflows-enabled/.test(m))).toBe(true);
   });
 
   it("stands down without withdrawing when the foreign tool took our own name", async () => {
     // First registration wins, so ours never reached the registry. There is
     // nothing to withdraw — but the menu and the CLI flag would still be live,
     // driving a tool the model cannot call, so the feature comes down anyway.
-    const booted = bootAuto();
+    const booted = await bootAuto();
     booted.pi.getAllTools.mockReturnValue([foreign("SubagentWorkflow")]);
     const context = uiContext();
 
@@ -1429,7 +1430,7 @@ describe("collisions with another extension", () => {
     const path = join(hermetic.dir, "flow.js");
     writeFileSync(path, fileScript);
     const booted = makePi({ [WORKFLOW_FILE_FLAG]: path });
-    subagentsExtension(booted.pi);
+    await subagentsExtension(booted.pi);
     booted.pi.getAllTools.mockReturnValue([foreign("Workflow")]);
     const context = uiContext();
 
@@ -1442,7 +1443,7 @@ describe("collisions with another extension", () => {
 
   it("keeps ours when the setting pins workflows on", async () => {
     // A default yields to what else is loaded. A choice does not.
-    const booted = boot({ workflowsEnabled: true });
+    const booted = await boot({ workflowsEnabled: true });
     booted.pi.getAllTools.mockReturnValue([foreign("Workflow")]);
     const context = uiContext();
 
@@ -1460,7 +1461,7 @@ describe("collisions with another extension", () => {
    * matter — row 0 is `Max concurrency`, whose single-value list re-applies the
    * value it already had. What matters is that the file gets written at all.
    */
-  async function changeAnUnrelatedSetting(booted: ReturnType<typeof boot>) {
+  async function changeAnUnrelatedSetting(booted: Awaited<ReturnType<typeof boot>>) {
     // The settings list asks for a real theme, which only the TUI normally sets up.
     initTheme(undefined, false);
     let built: any;
@@ -1488,35 +1489,45 @@ describe("collisions with another extension", () => {
     return context;
   }
 
-  const savedSettings = () =>
-    JSON.parse(readFileSync(join(hermetic.dir, ".pi", "subagents.json"), "utf-8"));
+  // jpi.kdl, not `.pi/subagents.json` — read back through the real Config
+  // loader rather than a JSON parse, since KDL isn't JSON. No args: PI_CODING_AGENT_DIR
+  // is already pointed at hermetic.agentDir by hermeticDir(), and createSubagentsConfig
+  // reads process.env by default.
+  const savedSettings = async () => (await loadSubagentsSettings(createSubagentsConfig())).value;
 
   it("does not persist a stand-down as an explicit setting", async () => {
     // The stand-down is scoped to the session that detected it. Writing it to
     // the file would let an unrelated settings change three menus away freeze
     // it into an explicit `false` — which then outlives the extension it was
     // deferring to, leaving workflows mysteriously off after an uninstall.
-    const booted = bootAuto();
+    // "auto" (the schema default) is that unpinned state.
+    const booted = await bootAuto();
     booted.pi.getAllTools.mockReturnValue([foreign("Workflow")]);
     await booted.lifecycle.get("session_start")?.({}, uiContext());
 
     await changeAnUnrelatedSetting(booted);
 
-    expect(savedSettings()).not.toHaveProperty("workflowsEnabled");
+    // The save is fire-and-forget from the settings menu (persistSettings is
+    // silent on success), so poll rather than assert immediately.
+    await vi.waitFor(async () => {
+      expect((await savedSettings()).workflowsEnabled).toBe("auto");
+    });
   });
 
   it("still persists the setting when the user pinned it", async () => {
-    const booted = boot({ workflowsEnabled: false });
+    const booted = await boot({ workflowsEnabled: false });
 
     await changeAnUnrelatedSetting(booted);
 
-    expect(savedSettings().workflowsEnabled).toBe(false);
+    await vi.waitFor(async () => {
+      expect((await savedSettings()).workflowsEnabled).toBe(false);
+    });
   });
 
   it("ignores tool names that merely contain the word", async () => {
     // A substring test would turn any CI integration into a silent shutdown of
     // this feature — the kind of bug nobody can see from the outside.
-    const booted = bootAuto();
+    const booted = await bootAuto();
     booted.pi.getAllTools.mockReturnValue([
       foreign("list_workflows"),
       foreign("github_workflow_run"),

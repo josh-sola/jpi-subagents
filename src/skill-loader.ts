@@ -2,7 +2,6 @@
  * skill-loader.ts — Preload named skills.
  *
  * Roots, in precedence order:
- *   - <cwd>/.pi/skills           (project, Pi's standard)
  *   - <cwd>/.agents/skills       (project, cross-tool Agent Skills spec — https://agentskills.io)
  *   - getAgentDir()/skills       (user, default ~/.pi/agent/skills — Pi's standard)
  *   - ~/.agents/skills           (user, cross-tool Agent Skills spec)
@@ -39,7 +38,6 @@ function loadSkillContent(name: string, cwd: string): string {
     return `(Skill "${name}" skipped: name contains path traversal characters)`;
   }
   const roots = [
-    join(cwd, ".pi", "skills"), // project — Pi standard
     join(cwd, ".agents", "skills"), // project — Agent Skills spec
     join(getAgentDir(), "skills"), // user — Pi standard
     join(homedir(), ".agents", "skills"), // user — Agent Skills spec
@@ -49,7 +47,7 @@ function loadSkillContent(name: string, cwd: string): string {
     const content = findInRoot(root, name);
     if (content !== undefined) return content;
   }
-  return `(Skill "${name}" not found in .pi/skills/, .agents/skills/, or global skill locations)`;
+  return `(Skill "${name}" not found in .agents/skills/ or global skill locations)`;
 }
 
 function findInRoot(root: string, name: string): string | undefined {

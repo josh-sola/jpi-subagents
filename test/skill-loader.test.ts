@@ -23,7 +23,7 @@ describe("preloadSkills", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  const projectRoot = () => join(tmpDir, ".pi", "skills");
+  const projectRoot = () => join(tmpDir, ".agents", "skills");
   const globalRoot = () => join(process.env.PI_CODING_AGENT_DIR!, "skills");
 
   function writeFlat(root: string, name: string, content: string, ext = ".md") {
@@ -75,17 +75,6 @@ describe("preloadSkills", () => {
   it("finds nested <subdir>/<name>/SKILL.md in getAgentDir()/skills", () => {
     writeSkillDir(join(globalRoot(), "dev-tools"), "using-modern-cli", "# Modern CLI");
     expect(preloadSkills(["using-modern-cli"], tmpDir)[0].content).toContain("Modern CLI");
-  });
-
-  it("loads <name>/SKILL.md from project .agents/skills (Agent Skills spec)", () => {
-    writeSkillDir(join(tmpDir, ".agents", "skills"), "writing-rust", "# Writing Rust");
-    expect(preloadSkills(["writing-rust"], tmpDir)[0].content).toContain("Writing Rust");
-  });
-
-  it("prefers .pi/skills over .agents/skills in the same project", () => {
-    writeSkillDir(projectRoot(), "shared", "from-pi");
-    writeSkillDir(join(tmpDir, ".agents", "skills"), "shared", "from-agents");
-    expect(preloadSkills(["shared"], tmpDir)[0].content).toBe("from-pi");
   });
 
   it("finds nested <subdir>/<name>/SKILL.md", () => {
@@ -206,13 +195,13 @@ describe("preloadSkills", () => {
   });
 
   it("rejects symlinked skill root", () => {
-    // <cwd>/.pi/skills → symlink to a directory that holds real-looking skills.
+    // <cwd>/.agents/skills → symlink to a directory that holds real-looking skills.
     const realRoot = join(tmpDir, "elsewhere");
     mkdirSync(realRoot, { recursive: true });
     writeFileSync(join(realRoot, "leaked-flat.md"), "TOP SECRET FLAT");
     mkdirSync(join(realRoot, "leaked-dir"), { recursive: true });
     writeFileSync(join(realRoot, "leaked-dir", "SKILL.md"), "TOP SECRET DIR");
-    mkdirSync(join(tmpDir, ".pi"), { recursive: true });
+    mkdirSync(join(tmpDir, ".agents"), { recursive: true });
     symlinkSync(realRoot, projectRoot());
 
     const flatResult = preloadSkills(["leaked-flat"], tmpDir)[0].content;

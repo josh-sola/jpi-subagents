@@ -104,7 +104,31 @@ export const flush = async () => {
 
 export interface Hermetic {
   dir: string;
+  /** The hermetic `PI_CODING_AGENT_DIR` — where jpi.kdl and global agents live. */
+  agentDir: string;
   restore: () => void;
+}
+
+function toKebabCase(camel: string): string {
+  return camel.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+}
+
+/** JS value → the KDL literal spelling `Config` renders/parses. */
+function encodeKdlValue(value: unknown): string {
+  if (typeof value === "boolean") return value ? "#true" : "#false";
+  if (typeof value === "number") return String(value);
+  return JSON.stringify(String(value));
+}
+
+/**
+ * Renders a `subagents { }` jpi.kdl stanza from a camelCase settings object,
+ * so tests seed settings as plain objects and never hand-write KDL.
+ */
+export function renderSubagentsKdl(settings: Record<string, unknown>): string {
+  const lines = Object.entries(settings).map(
+    ([key, value]) => `  ${toKebabCase(key)} ${encodeKdlValue(value)}`,
+  );
+  return `subagents {\n${lines.join("\n")}\n}\n`;
 }
 
 /**
@@ -114,6 +138,7 @@ export interface Hermetic {
  */
 export function hermeticDir(opts: {
   settings?: Record<string, unknown>;
+  /** Global custom agents, written to `<agentDir>/agents/<name>.md`. */
   agentFiles?: Record<string, string>;
 } = {}): Hermetic {
   const dir = mkdtempSync(join(tmpdir(), "pi-boot-"));
@@ -122,14 +147,13 @@ export function hermeticDir(opts: {
   const prevAgentDir = process.env.PI_CODING_AGENT_DIR;
   const prevHome = process.env.HOME;
 
-  mkdirSync(join(dir, ".pi"), { recursive: true });
   if (opts.settings) {
-    writeFileSync(join(dir, ".pi", "subagents.json"), JSON.stringify(opts.settings));
+    writeFileSync(join(agentDir, "jpi.kdl"), renderSubagentsKdl(opts.settings));
   }
   if (opts.agentFiles) {
-    mkdirSync(join(dir, ".pi", "agents"), { recursive: true });
+    mkdirSync(join(agentDir, "agents"), { recursive: true });
     for (const [name, content] of Object.entries(opts.agentFiles)) {
-      writeFileSync(join(dir, ".pi", "agents", `${name}.md`), content);
+      writeFileSync(join(agentDir, "agents", `${name}.md`), content);
     }
   }
 
@@ -139,6 +163,7 @@ export function hermeticDir(opts: {
 
   return {
     dir,
+    agentDir,
     restore() {
       process.chdir(prevCwd);
       if (prevAgentDir == null) delete process.env.PI_CODING_AGENT_DIR;

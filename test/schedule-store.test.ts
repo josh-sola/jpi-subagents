@@ -40,9 +40,19 @@ describe("ScheduleStore", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("resolveStorePath produces session-scoped path under .pi/subagent-schedules/", () => {
-    const p = resolveStorePath("/repo", "abc123");
-    expect(p).toBe("/repo/.pi/subagent-schedules/abc123.json");
+  it("resolveStorePath produces a session-scoped path under <agentDir>/jpi/", () => {
+    const p = resolveStorePath("abc123", {}, "/home/josh");
+    expect(p).toBe("/home/josh/.pi/agent/jpi/subagents/schedules-abc123.json");
+  });
+
+  it("resolveStorePath sanitizes a session ID to Store's charset", () => {
+    const p = resolveStorePath("a/b c:d", {}, "/home/josh");
+    expect(p).toBe("/home/josh/.pi/agent/jpi/subagents/schedules-a-b-c-d.json");
+  });
+
+  it("resolveStorePath keeps a leading dot from becoming an invalid Store file name", () => {
+    const p = resolveStorePath(".hidden", {}, "/home/josh");
+    expect(p).toBe("/home/josh/.pi/agent/jpi/subagents/schedules-s.hidden.json");
   });
 
   it("starts empty and round-trips a job through add/list", () => {

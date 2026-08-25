@@ -12,7 +12,7 @@
  * real background agent, let it complete, fire the real session event, then read
  * it back through the real tool — the exact path the reporter hit.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -108,8 +108,7 @@ describe("issue #108: unread completed background agents survive session events"
     process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.HOME = agentDir;
     prevCwd = process.cwd();
-    mkdirSync(join(tmpDir, ".pi"), { recursive: true });
-    writeFileSync(join(tmpDir, ".pi", "subagents.json"), JSON.stringify({ schedulingEnabled: false }));
+    writeFileSync(join(agentDir, "jpi.kdl"), "subagents {\n  scheduling-enabled #false\n}\n");
     process.chdir(tmpDir);
   });
 
@@ -126,7 +125,7 @@ describe("issue #108: unread completed background agents survive session events"
 
   it("session_before_switch (user switches sessions) does NOT wipe the unread result", async () => {
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     const id = await spawnCompletedBackgroundAgent(tools);
 
     // The exact #108 trigger: a session switch fires before the LLM read the result.
@@ -142,7 +141,7 @@ describe("issue #108: unread completed background agents survive session events"
 
   it("session_start (/resume) does NOT wipe the unread result", async () => {
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     const id = await spawnCompletedBackgroundAgent(tools);
 
     await lifecycle.get("session_start")?.({}, ctx());
@@ -157,7 +156,7 @@ describe("issue #108: unread completed background agents survive session events"
 
   it("once read, a session switch DOES evict it — the fix stays surgical, no leak", async () => {
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     const id = await spawnCompletedBackgroundAgent(tools);
 
     // LLM reads the result → resultConsumed=true.

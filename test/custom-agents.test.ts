@@ -28,18 +28,22 @@ describe("loadCustomAgents", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  function writeAgentIn(projectDir: ".agents" | ".pi", name: string, content: string) {
-    const dir = join(tmpDir, projectDir, "agents");
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, `${name}.md`), content);
+  // Global tier — the default location most of these tests write to.
+  // `HOME` is redirected to `tmpDir` above with `PI_CODING_AGENT_DIR` unset,
+  // so pi-coding-agent's `getAgentDir()` resolves to `<tmpDir>/.pi/agent`.
+  function globalAgentsDir(): string {
+    return join(tmpDir, ".pi", "agent", "agents");
   }
 
   function writeAgent(name: string, content: string) {
-    writeAgentIn(".pi", name, content);
+    mkdirSync(globalAgentsDir(), { recursive: true });
+    writeFileSync(join(globalAgentsDir(), `${name}.md`), content);
   }
 
   function writeWorkspaceAgent(name: string, content: string) {
-    writeAgentIn(".agents", name, content);
+    const dir = join(tmpDir, ".agents", "agents");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${name}.md`), content);
   }
 
   it("returns empty map when custom agent dirs do not exist", () => {
@@ -59,24 +63,6 @@ Workspace prompt.`);
     expect(result.get("reviewer")?.description).toBe("Workspace Reviewer");
     expect(result.get("reviewer")?.systemPrompt).toBe("Workspace prompt.");
     expect(result.get("reviewer")?.source).toBe("project");
-  });
-
-  it(".pi/agents overrides .agents/agents on a name clash", () => {
-    writeWorkspaceAgent("dupe", `---
-description: Workspace Project
----
-
-Workspace prompt.`);
-    writeAgent("dupe", `---
-description: Pi Project
----
-
-Pi prompt.`);
-
-    const result = loadCustomAgents(tmpDir);
-    expect(result.size).toBe(1);
-    expect(result.get("dupe")?.description).toBe("Pi Project");
-    expect(result.get("dupe")?.systemPrompt).toBe("Pi prompt.");
   });
 
   it("workspace project agents override global agents", () => {
@@ -488,7 +474,7 @@ Second agent.`);
   });
 
   it("skips non-.md files", () => {
-    const dir = join(tmpDir, ".pi", "agents");
+    const dir = join(tmpDir, ".pi", "agent", "agents");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "notes.txt"), "not an agent");
     writeFileSync(join(dir, "real.md"), `---
@@ -610,7 +596,7 @@ description: Reviews code
 Agent prompt.`);
 
     expect(loadCustomAgents(tmpDir).get("code-review")!.sourcePath)
-      .toBe(join(tmpDir, ".pi", "agents", "blubb.md"));
+      .toBe(join(tmpDir, ".pi", "agent", "agents", "blubb.md"));
   });
 
   it("falls back to the filename for an empty or blank declared name", () => {
@@ -769,16 +755,23 @@ All tools.`);
     expect(result.get("unrestricted")!.disallowedTools).toBeUndefined();
   });
 
-  it("parses memory scope", () => {
+  it("collapses the retired project/local memory scopes to user", () => {
     writeAgent("rememberer", `---
 description: Agent with memory
 memory: project
 ---
 
 Remember things.`);
+    writeAgent("rememberer-local", `---
+description: Agent with memory
+memory: local
+---
+
+Remember things.`);
 
     const result = loadCustomAgents(tmpDir);
-    expect(result.get("rememberer")!.memory).toBe("project");
+    expect(result.get("rememberer")!.memory).toBe("user");
+    expect(result.get("rememberer-local")!.memory).toBe("user");
   });
 
   it("parses memory: user scope", () => {
@@ -911,7 +904,7 @@ Good body.`);
       loadCustomAgents(tmpDir);
 
       const message = warn.mock.calls.map(args => String(args[0])).join("\n");
-      expect(message).toContain(join(tmpDir, ".pi", "agents", "broken.md"));
+      expect(message).toContain(join(tmpDir, ".pi", "agent", "agents", "broken.md"));
       expect(message).toContain("Nested mappings are not allowed");
     } finally {
       warn.mockRestore();
@@ -924,14 +917,16 @@ Good body.`);
   it("warns when a skipped file was overriding an agent that stays resolvable", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      writeWorkspaceAgent("dup", "---\ndescription: Earlier definition\n---\n\nEarlier body.");
-      writeAgent("dup", "---\nname: dup\ndescription: Use this: that\n---\n\nBroken body.");
+      // Global loads first (lowest priority); workspace loads last and would
+      // overwrite it — but its file is broken, so the global definition survives.
+      writeAgent("dup", "---\ndescription: Earlier definition\n---\n\nEarlier body.");
+      writeWorkspaceAgent("dup", "---\nname: dup\ndescription: Use this: that\n---\n\nBroken body.");
 
       const result = loadCustomAgents(tmpDir);
 
       expect(result.get("dup")?.description).toBe("Earlier definition");
       const message = warn.mock.calls.map(args => String(args[0])).join("\n");
-      expect(message).toContain(`Agent "dup" now loads from ${join(tmpDir, ".agents", "agents", "dup.md")} instead`);
+      expect(message).toContain(`Agent "dup" now loads from ${join(globalAgentsDir(), "dup.md")} instead`);
     } finally {
       warn.mockRestore();
     }
@@ -942,8 +937,8 @@ Good body.`);
   it("does not claim a fallback when the shadowed definition is disabled", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      writeWorkspaceAgent("dup", "---\ndescription: Earlier definition\nenabled: false\n---\n\nEarlier body.");
-      writeAgent("dup", "---\nname: dup\ndescription: Use this: that\n---\n\nBroken body.");
+      writeAgent("dup", "---\ndescription: Earlier definition\nenabled: false\n---\n\nEarlier body.");
+      writeWorkspaceAgent("dup", "---\nname: dup\ndescription: Use this: that\n---\n\nBroken body.");
 
       loadCustomAgents(tmpDir);
 
@@ -974,7 +969,7 @@ Good body.`);
   it("throws naming the file when strict, and skips it when not", () => {
     writeAgent("broken", "---\nname: broken\ndescription: Use this: that\n---\n\nBroken.");
     writeAgent("healthy", "---\ndescription: Fine\n---\n\nFine.");
-    const brokenPath = join(tmpDir, ".pi", "agents", "broken.md");
+    const brokenPath = join(tmpDir, ".pi", "agent", "agents", "broken.md");
 
     expect(() => loadCustomAgents(tmpDir, true)).toThrow(brokenPath);
     expect(() => loadCustomAgents(tmpDir, true)).toThrow("Nested mappings are not allowed");
@@ -1099,7 +1094,7 @@ Good body.`);
         runInBackground: true,
         outputTranscript: false,
         isolated: true,
-        memory: "project",
+        memory: "user",
         isolation: "worktree",
       });
       expect(loaded.displayName).toBe("RT");
@@ -1113,7 +1108,7 @@ Good body.`);
       expect(loaded.runInBackground).toBe(true);
       expect(loaded.outputTranscript).toBe(false);
       expect(loaded.isolated).toBe(true);
-      expect(loaded.memory).toBe("project");
+      expect(loaded.memory).toBe("user");
       expect(loaded.isolation).toBe("worktree");
     });
 

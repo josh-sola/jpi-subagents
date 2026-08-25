@@ -19,7 +19,7 @@ vi.mock("../src/worktree.js", async () => {
 
 import subagentsExtension from "../src/index.js";
 
-function boot() {
+async function boot() {
   const tools = new Map<string, any>();
   const pi = {
     registerMessageRenderer: vi.fn(),
@@ -33,7 +33,7 @@ function boot() {
     appendEntry: vi.fn(),
     sendMessage: vi.fn(),
   } as any;
-  subagentsExtension(pi);
+  await subagentsExtension(pi);
   return tools;
 }
 
@@ -77,7 +77,7 @@ describe("Agent startup failures fail the tool call (#179)", () => {
 
   for (const background of [false, true]) {
     it(`rejects instead of returning the diagnostic (run_in_background: ${background})`, async () => {
-      const tools = boot();
+      const tools = await boot();
 
       await expect(
         tools.get("Agent").execute(

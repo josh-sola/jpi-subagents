@@ -15,7 +15,7 @@ export type SubagentType = string;
 export const DEFAULT_AGENT_NAMES = ["general-purpose", "Explore", "Plan"] as const;
 
 /** Memory scope for persistent agent memory. */
-export type MemoryScope = "user" | "project" | "local";
+export type MemoryScope = "user";
 
 /**
  * Isolation mode for agent execution.
@@ -336,7 +336,7 @@ export interface EnvInfo {
 /**
  * A subagent spawn registered to fire on a schedule.
  *
- * Stored at `<cwd>/.pi/subagent-schedules/<sessionId>.json`. Session-scoped:
+ * Stored at `<agentDir>/jpi/subagents/schedules-<sessionId>.json`. Session-scoped:
  * survives `/resume` but resets on `/new`, mirroring pi-chonky-tasks.
  */
 export interface ScheduledSubagent {

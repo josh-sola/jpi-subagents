@@ -89,7 +89,7 @@ describe("loadCustomAgents (runs on every Agent call)", () => {
   }
 });
 
-describe("Agent tool — background spawn", () => {
+describe("Agent tool — background spawn", async () => {
   vi.mocked(runAgent).mockImplementation(async () => ({
     responseText: "done",
     session: { dispose: vi.fn() } as any,
@@ -98,16 +98,16 @@ describe("Agent tool — background spawn", () => {
   }));
 
   /** A freshly activated extension, reading agent files from `globalRedirect`. */
-  function bootAgentTool() {
+  async function bootAgentTool() {
     const { pi, tools } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     return tools.get("Agent");
   }
 
   const c = ctx();
   let i = 0;
 
-  const agent = bootAgentTool();
+  const agent = await bootAgentTool();
 
   /**
    * The sample count is pinned, and that pin is what makes this number mean

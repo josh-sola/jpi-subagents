@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import subagentsExtension from "../src/index.js";
 
-function agentTool() {
+async function agentTool() {
   const tools = new Map<string, any>();
   const pi = {
     registerMessageRenderer: vi.fn(),
@@ -15,7 +15,7 @@ function agentTool() {
     appendEntry: vi.fn(),
     sendMessage: vi.fn(),
   } as any;
-  subagentsExtension(pi);
+  await subagentsExtension(pi);
   return tools.get("Agent");
 }
 
@@ -34,8 +34,8 @@ function render(tool: any, result: any): string {
 }
 
 describe("Agent tool invocation error rendering", () => {
-  it("shows a Pi tool error instead of structured terminal status", () => {
-    const output = render(agentTool(), {
+  it("shows a Pi tool error instead of structured terminal status", async () => {
+    const output = render(await agentTool(), {
       content: [{ type: "text", text: 'Cannot run with isolation: "worktree" — Git probe failed.' }],
       isError: true,
       details: { status: "aborted" },
@@ -50,8 +50,8 @@ describe("Agent tool invocation error rendering", () => {
     ["empty details", {}],
     ["unknown status", { status: "unknown" }],
     ["a status with no rendering of its own", { status: "queued" }],
-  ])("shows the real result text for %s", (_name, details) => {
-    const output = render(agentTool(), {
+  ])("shows the real result text for %s", async (_name, details) => {
+    const output = render(await agentTool(), {
       content: [{ type: "text", text: "Unstructured Agent result." }],
       isError: false,
       details,

@@ -95,8 +95,7 @@ describe("Agent tool — background resume wiring", () => {
     previousHome = process.env.HOME;
     process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.HOME = agentDir;
-    mkdirSync(join(cwd, ".pi"), { recursive: true });
-    writeFileSync(join(cwd, ".pi", "subagents.json"), JSON.stringify({ schedulingEnabled: false }));
+    writeFileSync(join(agentDir, "jpi.kdl"), "subagents {\n  scheduling-enabled #false\n}\n");
     mkdirSync(join(agentDir, "agents"), { recursive: true });
     process.chdir(cwd);
 
@@ -150,7 +149,7 @@ describe("Agent tool — background resume wiring", () => {
   // kept running.
   it("does not tie the detached run to the tool-call signal", async () => {
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     const ctx = makeCtx(cwd);
     const id = await spawnSettled(tools, ctx);
 
@@ -184,7 +183,7 @@ describe("Agent tool — background resume wiring", () => {
   // on the file the previous run wrote. writeInitialEntry truncates it.
   it("appends to the agent's existing transcript instead of truncating it", async () => {
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     const ctx = makeCtx(cwd);
     const id = await spawnSettled(tools, ctx);
 
@@ -217,7 +216,7 @@ describe("Agent tool — background resume wiring", () => {
   it("reports the record's own type, not the caller's ignored subagent_type", async () => {
     writeFileSync(join(agentDir, "agents", "explorer.md"), `---\ndescription: Explorer agent\n---\n\nExplore.`);
     const { pi, tools, lifecycle, emitted } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     const ctx = makeCtx(cwd);
     const id = await spawnSettled(tools, ctx, "general-purpose");
 
@@ -245,7 +244,7 @@ describe("Agent tool — background resume wiring", () => {
   // a generic failure.
   it("refuses a second background resume while the first run is in flight", async () => {
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     const ctx = makeCtx(cwd);
     const id = await spawnSettled(tools, ctx);
 
@@ -268,7 +267,7 @@ describe("Agent tool — background resume wiring", () => {
   // foreground is now the explicit case rather than the implicit one.
   it("still resumes in the foreground when run_in_background is false", async () => {
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     const ctx = makeCtx(cwd);
     const id = await spawnSettled(tools, ctx);
 

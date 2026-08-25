@@ -35,7 +35,6 @@ coverage/
 # Benchmark output — absolute timings are machine-specific, never committed
 test/perf/.results/
 .gitnexus
-.pi/subagents.json
 
 # Pi internal files
 progress.md

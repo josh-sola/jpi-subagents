@@ -2,16 +2,25 @@
  * schedule-store.ts — File-backed store for scheduled subagents.
  *
  * Session-scoped: each pi session owns its own schedules at
- * `<cwd>/.pi/subagent-schedules/<sessionId>.json`. `/new` starts a fresh
- * empty store; `/resume` reloads.
+ * `<agentDir>/jpi/subagents/schedules-<sessionId>.json`. `/new` starts a
+ * fresh empty store; `/resume` reloads.
  *
  * Concurrency model lifted from pi-chonky-tasks/src/task-store.ts: every
  * mutation acquires a PID-based exclusion lock, re-reads the latest state
  * from disk, applies the change, atomic-writes via temp+rename, releases.
+ *
+ * The store's read/write/lock path stays plain synchronous fs, deliberately
+ * not jpi-base's `Store`: every call site here is synchronous by necessity —
+ * croner/setInterval timer callbacks (`executeJob`, `scheduleJob`) and the
+ * `/agents → Scheduled jobs` menu — and `Store`'s read/write are async. Only
+ * the file's location is jpi-base's: `Store.path()` computes
+ * `<agentDir>/jpi/subagents/<file>` without any I/O, so it can be called from
+ * a synchronous constructor.
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
+import { Store } from "jpi-base";
 import type { ScheduledSubagent, ScheduleStoreData } from "./types.js";
 
 const LOCK_RETRY_MS = 50;
@@ -49,9 +58,21 @@ function releaseLock(lockPath: string): void {
   try { unlinkSync(lockPath); } catch { /* ignore */ }
 }
 
-/** Resolve the storage path for a session-scoped store. */
-export function resolveStorePath(cwd: string, sessionId: string): string {
-  return join(cwd, ".pi", "subagent-schedules", `${sessionId}.json`);
+/** Store's file-name charset — anything else in a session ID becomes `-`. */
+function sanitizeSessionId(sessionId: string): string {
+  const cleaned = sessionId.replace(/[^A-Za-z0-9._-]/g, "-");
+  // Store also rejects a leading dot.
+  return cleaned.startsWith(".") ? `s${cleaned}` : cleaned || "session";
+}
+
+/** Resolve the storage path for a session-scoped store, under `<agentDir>/jpi/`. */
+export function resolveStorePath(
+  sessionId: string,
+  env?: NodeJS.ProcessEnv,
+  homeDirectory?: string,
+): string {
+  const store = new Store("subagents", env, homeDirectory);
+  return store.path(`schedules-${sanitizeSessionId(sessionId)}.json`);
 }
 
 export class ScheduleStore {

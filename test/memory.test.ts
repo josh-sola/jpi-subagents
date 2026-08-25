@@ -32,17 +32,10 @@ describe("memory", () => {
   });
 
   describe("resolveMemoryDir", () => {
-    it("resolves project scope to .pi/agent-memory/<name>", () => {
-      const dir = resolveMemoryDir("auditor", "project", "/workspace");
-      expect(dir).toBe("/workspace/.pi/agent-memory/auditor");
-    });
-
-    it("resolves local scope to .pi/agent-memory-local/<name>", () => {
-      const dir = resolveMemoryDir("auditor", "local", "/workspace");
-      expect(dir).toBe("/workspace/.pi/agent-memory-local/auditor");
-    });
-
-    it("resolves user scope under the agent dir (honors PI_CODING_AGENT_DIR)", () => {
+    // "user" is the only remaining scope — project/local memory is gone, and
+    // custom-agents.ts's parseMemory already collapses those frontmatter
+    // values to "user" before they ever reach here.
+    it("resolves under the agent dir (honors PI_CODING_AGENT_DIR), ignoring cwd", () => {
       const originalEnv = process.env.PI_CODING_AGENT_DIR;
       process.env.PI_CODING_AGENT_DIR = join(tmpDir, "custom-agent-dir");
       try {
@@ -56,35 +49,35 @@ describe("memory", () => {
     });
 
     it("throws on names with path traversal (..)", () => {
-      expect(() => resolveMemoryDir("../../etc/evil", "project", "/workspace")).toThrow("Unsafe agent name");
+      expect(() => resolveMemoryDir("../../etc/evil", "user", "/workspace")).toThrow("Unsafe agent name");
     });
 
     it("throws on names with forward slash", () => {
-      expect(() => resolveMemoryDir("foo/bar", "project", "/workspace")).toThrow("Unsafe agent name");
+      expect(() => resolveMemoryDir("foo/bar", "user", "/workspace")).toThrow("Unsafe agent name");
     });
 
     it("throws on names with backslash", () => {
-      expect(() => resolveMemoryDir("foo\\bar", "project", "/workspace")).toThrow("Unsafe agent name");
+      expect(() => resolveMemoryDir("foo\\bar", "user", "/workspace")).toThrow("Unsafe agent name");
     });
 
     it("throws on names with null byte", () => {
-      expect(() => resolveMemoryDir("foo\0bar", "project", "/workspace")).toThrow("Unsafe agent name");
+      expect(() => resolveMemoryDir("foo\0bar", "user", "/workspace")).toThrow("Unsafe agent name");
     });
 
     it("throws on empty name", () => {
-      expect(() => resolveMemoryDir("", "project", "/workspace")).toThrow("Unsafe agent name");
+      expect(() => resolveMemoryDir("", "user", "/workspace")).toThrow("Unsafe agent name");
     });
 
     it("throws on names starting with dot", () => {
-      expect(() => resolveMemoryDir(".hidden", "project", "/workspace")).toThrow("Unsafe agent name");
+      expect(() => resolveMemoryDir(".hidden", "user", "/workspace")).toThrow("Unsafe agent name");
     });
 
     it("throws on names with spaces", () => {
-      expect(() => resolveMemoryDir("foo bar", "project", "/workspace")).toThrow("Unsafe agent name");
+      expect(() => resolveMemoryDir("foo bar", "user", "/workspace")).toThrow("Unsafe agent name");
     });
 
     it("allows hyphens, underscores, and dots in names", () => {
-      expect(() => resolveMemoryDir("my-agent_v2.1", "project", "/workspace")).not.toThrow();
+      expect(() => resolveMemoryDir("my-agent_v2.1", "user", "/workspace")).not.toThrow();
     });
   });
 
@@ -229,7 +222,7 @@ describe("memory", () => {
 
   describe("buildMemoryBlock", () => {
     it("builds memory block with no existing MEMORY.md", () => {
-      const block = buildMemoryBlock("test-agent", "project", tmpDir);
+      const block = buildMemoryBlock("test-agent", "user", tmpDir);
       expect(block).toContain("Agent Memory");
       expect(block).toContain("agent-memory/test-agent");
       expect(block).toContain("No MEMORY.md exists yet");
@@ -237,35 +230,28 @@ describe("memory", () => {
     });
 
     it("builds memory block with existing MEMORY.md", () => {
-      const memDir = join(tmpDir, ".pi", "agent-memory", "test-agent");
+      const memDir = join(tmpDir, "home", ".pi", "agent", "agent-memory", "test-agent");
       mkdirSync(memDir, { recursive: true });
       writeFileSync(join(memDir, "MEMORY.md"), "# Existing\n- recall this");
-      const block = buildMemoryBlock("test-agent", "project", tmpDir);
+      const block = buildMemoryBlock("test-agent", "user", tmpDir);
       expect(block).toContain("Existing");
       expect(block).toContain("recall this");
       expect(block).not.toContain("No MEMORY.md exists yet");
     });
 
     it("creates memory directory if it doesn't exist", () => {
-      const memDir = join(tmpDir, ".pi", "agent-memory", "new-agent");
+      const memDir = join(tmpDir, "home", ".pi", "agent", "agent-memory", "new-agent");
       expect(existsSync(memDir)).toBe(false);
-      buildMemoryBlock("new-agent", "project", tmpDir);
+      buildMemoryBlock("new-agent", "user", tmpDir);
       expect(existsSync(memDir)).toBe(true);
     });
 
     it("includes Read/Write/Edit instructions", () => {
-      const block = buildMemoryBlock("test-agent", "project", tmpDir);
+      const block = buildMemoryBlock("test-agent", "user", tmpDir);
       expect(block).toContain("Read, Write, and Edit tools");
     });
 
-    it("uses correct directory for local scope", () => {
-      const block = buildMemoryBlock("test-agent", "local", tmpDir);
-      expect(block).toContain("agent-memory-local/test-agent");
-    });
-
-    it("uses correct directory for user scope", () => {
-      // Pin the agent dir to a temp location so the test doesn't create
-      // directories in the real home / agent dir (buildMemoryBlock mkdirs).
+    it("resolves under the agent dir, ignoring cwd (honors PI_CODING_AGENT_DIR)", () => {
       const originalEnv = process.env.PI_CODING_AGENT_DIR;
       process.env.PI_CODING_AGENT_DIR = join(tmpDir, "agent-dir");
       try {
@@ -278,16 +264,14 @@ describe("memory", () => {
       }
     });
 
-    it("includes scope label in header", () => {
-      expect(buildMemoryBlock("a", "project", tmpDir)).toContain("Memory scope: project");
-      expect(buildMemoryBlock("a", "local", tmpDir)).toContain("Memory scope: local");
+    it("includes the scope label in the header", () => {
       expect(buildMemoryBlock("a", "user", tmpDir)).toContain("Memory scope: user");
     });
   });
 
   describe("buildReadOnlyMemoryBlock", () => {
     it("returns read-only instructions without write/edit mention", () => {
-      const block = buildReadOnlyMemoryBlock("test-agent", "project", tmpDir);
+      const block = buildReadOnlyMemoryBlock("test-agent", "user", tmpDir);
       expect(block).toContain("read-only");
       expect(block).not.toContain("Write");
       expect(block).not.toContain("Edit");
@@ -295,48 +279,46 @@ describe("memory", () => {
     });
 
     it("does NOT create the memory directory", () => {
-      const memDir = join(tmpDir, ".pi", "agent-memory", "ro-agent");
+      const memDir = join(tmpDir, "home", ".pi", "agent", "agent-memory", "ro-agent");
       expect(existsSync(memDir)).toBe(false);
-      buildReadOnlyMemoryBlock("ro-agent", "project", tmpDir);
+      buildReadOnlyMemoryBlock("ro-agent", "user", tmpDir);
       expect(existsSync(memDir)).toBe(false);
     });
 
     it("includes existing MEMORY.md content", () => {
-      const memDir = join(tmpDir, ".pi", "agent-memory", "test-agent");
+      const memDir = join(tmpDir, "home", ".pi", "agent", "agent-memory", "test-agent");
       mkdirSync(memDir, { recursive: true });
       writeFileSync(join(memDir, "MEMORY.md"), "# Existing\n- recall this");
-      const block = buildReadOnlyMemoryBlock("test-agent", "project", tmpDir);
+      const block = buildReadOnlyMemoryBlock("test-agent", "user", tmpDir);
       expect(block).toContain("Existing");
       expect(block).toContain("recall this");
     });
 
     it("returns 'no memory available' when no MEMORY.md exists", () => {
-      const block = buildReadOnlyMemoryBlock("test-agent", "project", tmpDir);
+      const block = buildReadOnlyMemoryBlock("test-agent", "user", tmpDir);
       expect(block).toContain("No memory is available yet");
       expect(block).not.toContain("Create one");
     });
 
-    it("includes scope label in header", () => {
-      expect(buildReadOnlyMemoryBlock("a", "project", tmpDir)).toContain("Memory scope: project");
-      expect(buildReadOnlyMemoryBlock("a", "local", tmpDir)).toContain("Memory scope: local");
+    it("includes the scope label in the header", () => {
       expect(buildReadOnlyMemoryBlock("a", "user", tmpDir)).toContain("Memory scope: user");
     });
 
     it("does not mention memory directory path for write access", () => {
-      const block = buildReadOnlyMemoryBlock("test-agent", "project", tmpDir);
+      const block = buildReadOnlyMemoryBlock("test-agent", "user", tmpDir);
       expect(block).not.toContain("persistent memory directory at:");
       expect(block).not.toContain("Create one at");
     });
 
     it("rejects symlinked memory directory in read-only mode", () => {
-      const realDir = join(tmpDir, ".pi", "agent-memory", "test-agent");
+      const memoryRoot = join(tmpDir, "home", ".pi", "agent", "agent-memory");
+      const realDir = join(memoryRoot, "test-agent");
       mkdirSync(realDir, { recursive: true });
       writeFileSync(join(realDir, "MEMORY.md"), "# Secret");
-      const linkDir = join(tmpDir, ".pi", "agent-memory", "linked-agent");
-      mkdirSync(join(tmpDir, ".pi", "agent-memory"), { recursive: true });
+      const linkDir = join(memoryRoot, "linked-agent");
       symlinkSync(realDir, linkDir);
       // Should not read through the symlink
-      const block = buildReadOnlyMemoryBlock("linked-agent", "project", tmpDir);
+      const block = buildReadOnlyMemoryBlock("linked-agent", "user", tmpDir);
       expect(block).toContain("No memory is available yet");
     });
   });

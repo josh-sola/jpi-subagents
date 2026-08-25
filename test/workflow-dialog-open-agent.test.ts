@@ -93,7 +93,7 @@ describe("the inspector opens a workflow agent's conversation", () => {
   /** Boot the extension and start a one-agent run in the background. */
   async function bootWithChild() {
     const booted = makePi();
-    subagentsExtension(booted.pi);
+    await subagentsExtension(booted.pi);
     const command = booted.commands.get("agents");
     if (!command) throw new Error("the extension did not register /agents");
     await booted.tools.get("SubagentWorkflow").execute(

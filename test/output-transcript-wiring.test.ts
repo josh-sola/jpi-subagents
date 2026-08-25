@@ -76,8 +76,7 @@ describe("output_transcript agent wiring", () => {
     previousHome = process.env.HOME;
     process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.HOME = agentDir;
-    mkdirSync(join(cwd, ".pi"), { recursive: true });
-    writeFileSync(join(cwd, ".pi", "subagents.json"), JSON.stringify({ schedulingEnabled: false }));
+    writeFileSync(join(agentDir, "jpi.kdl"), "subagents {\n  scheduling-enabled #false\n}\n");
     mkdirSync(join(agentDir, "agents"), { recursive: true });
     process.chdir(cwd);
     vi.mocked(runAgent).mockImplementation(async (_ctx, _type, _prompt, options) => {
@@ -103,7 +102,7 @@ describe("output_transcript agent wiring", () => {
   it("creates no transcript when a custom agent sets output_transcript false", async () => {
     writeFileSync(join(agentDir, "agents", "sensitive.md"), `---\ndescription: Sensitive in-memory agent\noutput_transcript: false\n---\n\nKeep data in memory.`);
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
 
     await tools.get("Agent").execute(
       "tool-call",
@@ -122,7 +121,7 @@ describe("output_transcript agent wiring", () => {
   it("also suppresses the background transcript", async () => {
     writeFileSync(join(agentDir, "agents", "sensitive.md"), `---\ndescription: Sensitive in-memory agent\noutput_transcript: false\nrun_in_background: true\n---\n\nKeep data in memory.`);
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
 
     await tools.get("Agent").execute(
       "tool-call",
@@ -140,7 +139,7 @@ describe("output_transcript agent wiring", () => {
 
   it("keeps transcript creation as the default", async () => {
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
 
     await tools.get("Agent").execute(
       "tool-call",
@@ -158,9 +157,12 @@ describe("output_transcript agent wiring", () => {
 
   it("suppresses the transcript project-wide when subagents.json sets outputTranscript false", async () => {
     // A plain default agent (no frontmatter) inherits the project default.
-    writeFileSync(join(cwd, ".pi", "subagents.json"), JSON.stringify({ schedulingEnabled: false, outputTranscript: false }));
+    writeFileSync(
+      join(agentDir, "jpi.kdl"),
+      "subagents {\n  scheduling-enabled #false\n  output-transcript #false\n}\n",
+    );
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
 
     await tools.get("Agent").execute(
       "tool-call",
@@ -177,10 +179,13 @@ describe("output_transcript agent wiring", () => {
   });
 
   it("lets agent frontmatter output_transcript true override a project outputTranscript false", async () => {
-    writeFileSync(join(cwd, ".pi", "subagents.json"), JSON.stringify({ schedulingEnabled: false, outputTranscript: false }));
+    writeFileSync(
+      join(agentDir, "jpi.kdl"),
+      "subagents {\n  scheduling-enabled #false\n  output-transcript #false\n}\n",
+    );
     writeFileSync(join(agentDir, "agents", "audited.md"), `---\ndescription: Always keeps a transcript\noutput_transcript: true\n---\n\nWrite a transcript regardless of the project default.`);
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
 
     await tools.get("Agent").execute(
       "tool-call",

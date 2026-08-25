@@ -17,7 +17,7 @@
  * env var to leave it alone — the pre-publish smoke sets PI_E2E_LIVE globally.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/pi-ai";
@@ -154,36 +154,54 @@ describe("worktree isolation e2e (real git, real pi-mono, faux model)", () => {
   it("downgrades to the main checkout when the project set worktreeIsolation: false", async () => {
     const repo = initGitRepo();
     repos.push(repo);
-    mkdirSync(join(repo, ".pi"), { recursive: true });
-    writeFileSync(join(repo, ".pi", "subagents.json"), JSON.stringify({ worktreeIsolation: false }));
 
-    // The caller passes `isolation: "worktree"` even though the setting drops
-    // the parameter from the schema — exactly what a model holding a cached tool
-    // spec does, and the case the downgrade (rather than a throw) exists for.
-    //
-    // Mutation note: the resolver gate (invocation-config) and the manager gate
-    // (agent-manager) are redundant on THIS path, so removing either one alone
-    // leaves this test green — verified, not assumed. That is the point of the
-    // second gate, which exists for cross-extension RPC, where options skip the
-    // resolver entirely. This test pins the behaviour and goes red when both are
-    // gone; each gate is pinned individually by its own unit test.
-    run = await runPrintMode({
-      prompt: "Delegate the work.",
-      cwd: repo,
-      respond: respondSpawning("worktree"),
-      live: false,
-    });
+    // Settings live in `<agentDir>/jpi.kdl`, not `<repo>/.pi/subagents.json`.
+    // runPrintMode's own hermetic agent dir is internal and not addressable
+    // before the run starts, so this test manages its own (isolateGlobals:
+    // false) — the same pattern ext-templates-e2e.test.ts uses.
+    const agentDir = mkdtempSync(join(tmpdir(), "wt-iso-e2e-agentdir-"));
+    repos.push(agentDir);
+    writeFileSync(join(agentDir, "jpi.kdl"), "subagents {\n  worktree-isolation #false\n}\n");
+    const prevAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const prevHome = process.env.HOME;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    process.env.HOME = agentDir;
 
-    const result = agentResultText(run.parentSession);
-    expect(result).toContain(CHILD_MARKER);
+    try {
+      // The caller passes `isolation: "worktree"` even though the setting drops
+      // the parameter from the schema — exactly what a model holding a cached tool
+      // spec does, and the case the downgrade (rather than a throw) exists for.
+      //
+      // Mutation note: the resolver gate (invocation-config) and the manager gate
+      // (agent-manager) are redundant on THIS path, so removing either one alone
+      // leaves this test green — verified, not assumed. That is the point of the
+      // second gate, which exists for cross-extension RPC, where options skip the
+      // resolver entirely. This test pins the behaviour and goes red when both are
+      // gone; each gate is pinned individually by its own unit test.
+      run = await runPrintMode({
+        prompt: "Delegate the work.",
+        cwd: repo,
+        respond: respondSpawning("worktree"),
+        live: false,
+        isolateGlobals: false,
+      });
 
-    // Ran in the main checkout: the file is right there, and no branch was made.
-    expect(existsSync(join(repo, MARKER_FILE))).toBe(true);
-    expect(git(repo, "branch", "--list", "pi-agent-*")).toBe("");
-    expect(git(repo, "worktree", "list").split("\n")).toHaveLength(1);
+      const result = agentResultText(run.parentSession);
+      expect(result).toContain(CHILD_MARKER);
 
-    // Silent by design — no per-result note, which is why the tool description
-    // drops the isolation bullet alongside the parameter (see index.ts).
-    expect(result).not.toContain("Changes saved to branch");
+      // Ran in the main checkout: the file is right there, and no branch was made.
+      expect(existsSync(join(repo, MARKER_FILE))).toBe(true);
+      expect(git(repo, "branch", "--list", "pi-agent-*")).toBe("");
+      expect(git(repo, "worktree", "list").split("\n")).toHaveLength(1);
+
+      // Silent by design — no per-result note, which is why the tool description
+      // drops the isolation bullet alongside the parameter (see index.ts).
+      expect(result).not.toContain("Changes saved to branch");
+    } finally {
+      if (prevAgentDir == null) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = prevAgentDir;
+      if (prevHome == null) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+    }
   });
 });

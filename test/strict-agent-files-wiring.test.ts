@@ -38,14 +38,16 @@ let originalCwd: string;
 let originalAgentDir: string | undefined;
 let originalHome: string | undefined;
 
-function writeSettings(settings: Record<string, unknown>): void {
-  const dir = join(cwd, ".pi");
+/** Pre-seeds jpi.kdl's `subagents { }` section, before the extension ever reads it. */
+function writeStrictAgentFilesSetting(): void {
+  const dir = join(cwd, "agent-dir");
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "subagents.json"), JSON.stringify(settings));
+  writeFileSync(join(dir, "jpi.kdl"), "subagents {\n  strict-agent-files #true\n}\n");
 }
 
 function writeBrokenAgent(): string {
-  const dir = join(cwd, ".pi", "agents");
+  // Global tier — PI_CODING_AGENT_DIR is redirected to <cwd>/agent-dir below.
+  const dir = join(cwd, "agent-dir", "agents");
   mkdirSync(dir, { recursive: true });
   const path = join(dir, "broken.md");
   writeFileSync(path, BROKEN);
@@ -59,8 +61,8 @@ describe("strictAgentFiles gates extension activation", () => {
     originalCwd = process.cwd();
     cwd = mkdtempSync(join(tmpdir(), "strict-agent-files-"));
     process.chdir(cwd);
-    // A developer's real ~/.pi/subagents.json would otherwise set this very
-    // setting under the tests, and their global agents would pollute the roster.
+    // A developer's real jpi.kdl would otherwise set this very setting under
+    // the tests, and their global agents would pollute the roster.
     originalAgentDir = process.env.PI_CODING_AGENT_DIR;
     originalHome = process.env.HOME;
     process.env.PI_CODING_AGENT_DIR = join(cwd, "agent-dir");
@@ -80,28 +82,32 @@ describe("strictAgentFiles gates extension activation", () => {
     rmSync(cwd, { recursive: true, force: true });
   });
 
-  it("aborts activation naming the file when enabled", () => {
+  it("aborts activation naming the file when enabled", async () => {
     const path = writeBrokenAgent();
-    writeSettings({ strictAgentFiles: true });
+    writeStrictAgentFilesSetting();
 
-    expect(() => subagentsExtension(makePi())).toThrow(path);
+    // The activation throw now happens after the settings load's `await` (the
+    // first async boundary), so it surfaces as a rejected promise rather than
+    // a synchronous throw — the same `void | Promise<void>` contract pi's
+    // extension loader already handles either way.
+    await expect(subagentsExtension(makePi())).rejects.toThrow(path);
   });
 
-  it("skips the file and activates when disabled (the default)", () => {
+  it("skips the file and activates when disabled (the default)", async () => {
     writeBrokenAgent();
 
-    expect(() => subagentsExtension(makePi())).not.toThrow();
+    await expect(subagentsExtension(makePi())).resolves.not.toThrow();
     expect(String(warn.mock.calls[0]?.[0])).toContain("Skipping agent file");
   });
 
   it("is a startup decision: a later reload of the same file does not throw", async () => {
     const path = writeBrokenAgent();
-    writeSettings({ strictAgentFiles: true });
+    writeStrictAgentFilesSetting();
 
     // Start clean, so the session exists — then break the file underneath it.
     writeFileSync(path, "---\ndescription: Fixed\n---\n\nFixed.\n");
     const pi = makePi();
-    expect(() => subagentsExtension(pi)).not.toThrow();
+    await expect(subagentsExtension(pi)).resolves.not.toThrow();
     writeFileSync(path, BROKEN);
 
     const agentTool = (pi.registerTool as any).mock.calls

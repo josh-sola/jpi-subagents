@@ -5,7 +5,7 @@
  * Unlike agent-runner-e2e.test.ts (which builds AgentConfig objects in code),
  * this exercises the FULL chain from frontmatter onward:
  *
- *   test/fixtures/.pi/agents/*.md         (pre-configured agent templates)
+ *   test/fixtures/.agents/agents/*.md      (pre-configured agent templates)
  *     → real loadCustomAgents()           (frontmatter → parseToolsField/ext:)
  *     → registerAgents()                  (real registry)
  *     → real runAgent() [headless]        (real DefaultResourceLoader loads the
@@ -40,7 +40,7 @@ import { registerFauxProvider } from "./helpers/pi-ai.js";
 vi.setConfig({ testTimeout: 30_000 });
 
 const FIXTURES_DIR = resolve(fileURLToPath(new URL("./fixtures", import.meta.url)));
-const TEMPLATES_DIR = join(FIXTURES_DIR, ".pi", "agents");
+const TEMPLATES_DIR = join(FIXTURES_DIR, ".agents", "agents");
 
 function csv(val: unknown): string[] {
   return typeof val === "string" ? val.split(",").map((s) => s.trim()).filter(Boolean) : [];
@@ -82,9 +82,9 @@ describe("ext: / tools: scoping — template-driven e2e (real pi-mono, headless)
 
     faux = registerFauxProvider({ provider: "faux", models: [{ id: "faux-1", contextWindow: 200_000 }] });
 
-    // Load the templates through the REAL loader (project agents come from
-    // <cwd>/.pi/agents → FIXTURES_DIR/.pi/agents) and install them in the
-    // registry runAgent reads from.
+    // Load the templates through the REAL loader (workspace agents come from
+    // <cwd>/.agents/agents → FIXTURES_DIR/.agents/agents) and install them in
+    // the registry runAgent reads from.
     registerAgents(loadCustomAgents(FIXTURES_DIR));
   });
 

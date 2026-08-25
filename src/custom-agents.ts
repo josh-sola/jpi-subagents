@@ -1,5 +1,7 @@
 /**
- * custom-agents.ts — Load user-defined agents from project (.pi/agents/, plus the shared .agents/agents/ workspace) and global ($PI_CODING_AGENT_DIR/agents/, default ~/.pi/agent/agents/) locations.
+ * custom-agents.ts — Load user-defined agents from the shared .agents/agents/
+ * workspace and global ($PI_CODING_AGENT_DIR/agents/, default
+ * ~/.pi/agent/agents/) locations.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -24,15 +26,12 @@ import type { AgentConfig, IsolationMode, MemoryScope, ThinkingLevel } from "./t
 const RESERVED_IN_TYPE = ":";
 
 /**
- * Scan for custom agent .md files from multiple locations.
+ * Scan for custom agent .md files from two locations.
  * Discovery hierarchy (higher priority wins):
- *   1. Project:   <cwd>/.pi/agents/*.md (authoritative — also where /agents writes)
- *   2. Workspace: <cwd>/.agents/agents/*.md (shared cross-tool .agents workspace, read-only)
- *   3. Global:    $PI_CODING_AGENT_DIR/agents/*.md (default: ~/.pi/agent/agents/*.md)
+ *   1. Workspace: <cwd>/.agents/agents/*.md (shared cross-tool .agents workspace, read-only)
+ *   2. Global:    $PI_CODING_AGENT_DIR/agents/*.md (default: ~/.pi/agent/agents/*.md)
  *
- * Project-level agents override global ones with the same name. On a name clash
- * between the two project locations, .pi/agents wins — .pi stays the project
- * authority; .agents/agents is an additional read location.
+ * Workspace agents override global ones with the same name.
  * Any name is allowed — names matching defaults (e.g. "Explore") override them.
  *
  * An agent's type comes from its frontmatter `name:`, falling back to the
@@ -44,12 +43,10 @@ const RESERVED_IN_TYPE = ":";
 export function loadCustomAgents(cwd: string, strict = false): Map<string, AgentConfig> {
   const globalDir = join(getAgentDir(), "agents");
   const workspaceProjectDir = join(cwd, ".agents", "agents");
-  const projectDir = join(cwd, ".pi", "agents");
 
   const agents = new Map<string, AgentConfig>();
   loadFromDir(globalDir, agents, "global", strict);            // lowest priority
-  loadFromDir(workspaceProjectDir, agents, "project", strict); // shared workspace
-  loadFromDir(projectDir, agents, "project", strict);          // highest priority (overwrites)
+  loadFromDir(workspaceProjectDir, agents, "project", strict); // highest priority (overwrites)
 
   warnedLastLoad = warnedThisLoad;
   warnedThisLoad = new Set();
@@ -287,10 +284,12 @@ function csvListOptional(val: unknown): string[] | undefined {
 
 /**
  * Parse a memory scope field.
- * omitted → undefined; "user"/"project"/"local" → MemoryScope.
+ * omitted → undefined; "user"/"project"/"local" → "user" — project and local
+ * memory no longer exist, so both silently collapse into the surviving scope
+ * rather than being rejected.
  */
 function parseMemory(val: unknown): MemoryScope | undefined {
-  if (val === "user" || val === "project" || val === "local") return val;
+  if (val === "user" || val === "project" || val === "local") return "user";
   return undefined;
 }
 

@@ -80,7 +80,7 @@ function spawn(tools: Map<string, any>, params: Record<string, unknown> = {}) {
 describe("backgroundByDefault", () => {
   it("returns an agent ID, not the result, when the call doesn't specify", async () => {
     const { pi, tools } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     settled("THE-PAYLOAD");
 
     const out = textOf(await spawn(tools));
@@ -93,7 +93,7 @@ describe("backgroundByDefault", () => {
 
   it("still blocks and returns the output inline when run_in_background is false", async () => {
     const { pi, tools } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     settled("THE-PAYLOAD");
 
     const out = textOf(await spawn(tools, { run_in_background: false }));
@@ -106,7 +106,7 @@ describe("backgroundByDefault", () => {
     // Six is the shape the Agent tool description tells the model to send.
     // With maxConcurrent at its old 4 this queued two of them.
     const { pi, tools } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     // Never settles — every agent stays occupying its slot for the whole test.
     vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}) as any);
 

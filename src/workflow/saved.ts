@@ -6,13 +6,11 @@
  * over the source at the call site, so a saved file and an inline one fail the
  * same way on a bad `meta` block.
  *
- * Roots mirror `loadCustomAgents` rather than inventing a fourth convention —
- * project `.pi` is the authority, the shared `.agents` workspace is an extra
- * read location, and the user's agent dir is the fallback:
+ * Roots mirror `loadCustomAgents` — the shared `.agents` workspace is the
+ * project-scoped read location, and the user's agent dir is the fallback:
  *
- *   1. <cwd>/.pi/workflows/<name>.js
- *   2. <cwd>/.agents/workflows/<name>.js
- *   3. getAgentDir()/workflows/<name>.js   (default ~/.pi/agent/workflows)
+ *   1. <cwd>/.agents/workflows/<name>.js
+ *   2. getAgentDir()/workflows/<name>.js   (default ~/.pi/agent/workflows)
  *
  * Precedence is expressed as first-hit-wins here, not last-write-wins as in the
  * agent loader, because a name resolves to one file — there is no map to
@@ -50,7 +48,6 @@ const WORKFLOW_EXTENSION = ".js";
 /** The roots a `name` is looked up in, highest priority first. */
 export function savedWorkflowRoots(cwd: string): string[] {
   return [
-    join(cwd, ".pi", "workflows"),
     join(cwd, ".agents", "workflows"),
     join(getAgentDir(), "workflows"),
   ];

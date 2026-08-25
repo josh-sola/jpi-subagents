@@ -1,14 +1,14 @@
 /**
  * memory.ts — Persistent agent memory: per-agent memory directories that persist across sessions.
  *
- * Memory scopes:
- *   - "user"    → getAgentDir()/agent-memory/{agent-name}/ (default ~/.pi/agent/agent-memory/, honors $PI_CODING_AGENT_DIR)
- *   - "project" → .pi/agent-memory/{agent-name}/
- *   - "local"   → .pi/agent-memory-local/{agent-name}/
+ * One scope: "user" → getAgentDir()/agent-memory/{agent-name}/ (default
+ * ~/.pi/agent/agent-memory/, honors $PI_CODING_AGENT_DIR). `memory:
+ * project|local` frontmatter is accepted but silently maps to "user" (see
+ * custom-agents.ts's `parseMemory`).
  *
- * The user scope previously hardcoded ~/.pi/agent-memory/. That legacy location
- * is still honored (read + write) when it exists and the new location doesn't,
- * so existing memories aren't orphaned.
+ * This scope previously hardcoded ~/.pi/agent-memory/. That legacy location is
+ * still honored (read + write) when it exists and the new location doesn't, so
+ * existing memories aren't orphaned.
  */
 
 import { existsSync, lstatSync, mkdirSync, readFileSync } from "node:fs";
@@ -55,30 +55,24 @@ export function safeReadFile(filePath: string): string | undefined {
 }
 
 /**
- * Resolve the memory directory path for a given agent + scope + cwd.
+ * Resolve the memory directory path for a given agent. `scope` and `_cwd` are
+ * kept as parameters — unused now that "user" is the only scope — so callers
+ * (agent-runner.ts) don't need to change.
  * Throws if agentName contains path traversal characters.
  */
-export function resolveMemoryDir(agentName: string, scope: MemoryScope, cwd: string): string {
+export function resolveMemoryDir(agentName: string, _scope: MemoryScope, _cwd: string): string {
   if (isUnsafeName(agentName)) {
     throw new Error(`Unsafe agent name for memory directory: "${agentName}"`);
   }
-  switch (scope) {
-    case "user": {
-      const current = join(getAgentDir(), "agent-memory", agentName);
-      // Legacy location from when this path was hardcoded. Keep using it if it
-      // already holds this agent's memory and the new location hasn't been
-      // created yet — otherwise existing memories would be silently orphaned.
-      const legacy = join(homedir(), ".pi", "agent-memory", agentName);
-      if (!existsSync(current) && existsSync(legacy) && !isSymlink(legacy)) {
-        return legacy;
-      }
-      return current;
-    }
-    case "project":
-      return join(cwd, ".pi", "agent-memory", agentName);
-    case "local":
-      return join(cwd, ".pi", "agent-memory-local", agentName);
+  const current = join(getAgentDir(), "agent-memory", agentName);
+  // Legacy location from when this path was hardcoded. Keep using it if it
+  // already holds this agent's memory and the new location hasn't been
+  // created yet — otherwise existing memories would be silently orphaned.
+  const legacy = join(homedir(), ".pi", "agent-memory", agentName);
+  if (!existsSync(current) && existsSync(legacy) && !isSymlink(legacy)) {
+    return legacy;
   }
+  return current;
 }
 
 /**

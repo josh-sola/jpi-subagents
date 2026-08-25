@@ -272,17 +272,7 @@ describe("findAgentFile", () => {
     writeFileSync(join(dir, `${name}.md`), ENABLED);
   }
 
-  it("prefers .pi/agents over .agents/agents and the personal dir", () => {
-    write(join(tmpDir, ".pi", "agents"), "scout");
-    write(join(tmpDir, ".agents", "agents"), "scout");
-    write(join(agentDir, "agents"), "scout");
-    expect(findAgentFile("scout", tmpDir)).toEqual({
-      path: join(tmpDir, ".pi", "agents", "scout.md"),
-      location: "project",
-    });
-  });
-
-  it("falls back to the workspace .agents/agents dir", () => {
+  it("prefers .agents/agents over the personal dir", () => {
     write(join(tmpDir, ".agents", "agents"), "scout");
     write(join(agentDir, "agents"), "scout");
     expect(findAgentFile("scout", tmpDir)).toEqual({
@@ -309,12 +299,12 @@ describe("findAgentFile", () => {
   // load — so the agent stays enabled while the toast reports success.
   describe("locateAgentFile", () => {
     it("uses the file the loader read, whatever it is called", () => {
-      write(join(tmpDir, ".pi", "agents"), "reviewer");
-      const sourcePath = join(tmpDir, ".pi", "agents", "reviewer.md");
+      write(join(tmpDir, ".agents", "agents"), "reviewer");
+      const sourcePath = join(tmpDir, ".agents", "agents", "reviewer.md");
 
       expect(locateAgentFile("code-reviewer", sourcePath, tmpDir)).toEqual({
         path: sourcePath,
-        location: "project",
+        location: "workspace",
       });
     });
 
@@ -329,25 +319,25 @@ describe("findAgentFile", () => {
     });
 
     it("falls back to the <type>.md probe for a built-in with no source file", () => {
-      write(join(tmpDir, ".pi", "agents"), "scout");
+      write(join(tmpDir, ".agents", "agents"), "scout");
 
       expect(locateAgentFile("scout", undefined, tmpDir)).toEqual({
-        path: join(tmpDir, ".pi", "agents", "scout.md"),
-        location: "project",
+        path: join(tmpDir, ".agents", "agents", "scout.md"),
+        location: "workspace",
       });
     });
 
     it("falls back when the recorded path has since been deleted", () => {
-      write(join(tmpDir, ".pi", "agents"), "scout");
+      write(join(tmpDir, ".agents", "agents"), "scout");
 
-      expect(locateAgentFile("scout", join(tmpDir, ".pi", "agents", "gone.md"), tmpDir)).toEqual({
-        path: join(tmpDir, ".pi", "agents", "scout.md"),
-        location: "project",
+      expect(locateAgentFile("scout", join(tmpDir, ".agents", "agents", "gone.md"), tmpDir)).toEqual({
+        path: join(tmpDir, ".agents", "agents", "scout.md"),
+        location: "workspace",
       });
     });
 
     it("finds nothing when neither the source path nor the probe resolves", () => {
-      expect(locateAgentFile("nope", join(tmpDir, ".pi", "agents", "gone.md"), tmpDir)).toBeUndefined();
+      expect(locateAgentFile("nope", join(tmpDir, ".agents", "agents", "gone.md"), tmpDir)).toBeUndefined();
     });
   });
 });

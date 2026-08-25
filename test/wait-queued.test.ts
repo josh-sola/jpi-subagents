@@ -93,7 +93,7 @@ async function spawnBackground(tools: Map<string, any>): Promise<{ id: string; q
 describe("get_subagent_result wait:true on a queued agent", () => {
   it("waits through queue start and returns the result (no 'still running')", async () => {
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
 
     const resolvers = deferredRuns();
 
@@ -131,7 +131,7 @@ describe("get_subagent_result wait:true on a queued agent", () => {
 
   it("aborts a running result wait without aborting or consuming the child", async () => {
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
 
     let resolveRun: (() => void) | undefined;
     let childSignal: AbortSignal | undefined;
@@ -186,7 +186,7 @@ describe("get_subagent_result wait:true on a queued agent", () => {
 
   it("aborts a queued result wait before the agent starts", async () => {
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
 
     const resolvers = deferredRuns();
     let queuedId: string | undefined;

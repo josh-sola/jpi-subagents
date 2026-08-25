@@ -56,7 +56,7 @@ afterEach(() => {
 });
 
 /** Boot the real extension in a hermetic cwd and hand back its Agent tool. */
-function bootAgentTool() {
+async function bootAgentTool() {
   hermetic = hermeticDir({
     agentFiles: {
       alpha: '---\ndescription: "First fixture agent."\n---\n\nAlpha.\n',
@@ -64,13 +64,13 @@ function bootAgentTool() {
     },
   });
   const { pi, tools } = makePi();
-  subagentsExtension(pi);
+  await subagentsExtension(pi);
   return tools.get("Agent");
 }
 
 describe("one Agent call, one sweep of the agent directories", () => {
   it("reloads agent files at most once per background spawn", async () => {
-    const agent = bootAgentTool();
+    const agent = await bootAgentTool();
     loads = 0; // activation legitimately loads once; this counts the call only
 
     await agent.execute(
@@ -86,7 +86,7 @@ describe("one Agent call, one sweep of the agent directories", () => {
   });
 
   it("does not scale the sweep with the number of spawns in flight", async () => {
-    const agent = bootAgentTool();
+    const agent = await bootAgentTool();
     loads = 0;
 
     for (let i = 0; i < 5; i++) {

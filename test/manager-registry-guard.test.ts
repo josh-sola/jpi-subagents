@@ -84,7 +84,7 @@ describe("Symbol.for manager registry across activations", () => {
 
     // Root session activates first and owns the registry.
     const root = makePi();
-    subagentsExtension(root.pi);
+    await subagentsExtension(root.pi);
     const rootEntry = (globalThis as any)[MANAGER_KEY];
     expect(rootEntry).toBeDefined();
 
@@ -94,7 +94,7 @@ describe("Symbol.for manager registry across activations", () => {
 
     // A child agent session re-activates the extension in-process.
     const child = makePi();
-    subagentsExtension(child.pi);
+    await subagentsExtension(child.pi);
 
     // Registry still points at the root's entry (child did not clobber it) …
     expect((globalThis as any)[MANAGER_KEY]).toBe(rootEntry);
@@ -116,10 +116,10 @@ describe("Symbol.for manager registry across activations", () => {
 // issues to itself, and a forged value for each buys something real.
 describe("the registry spawn strips internal capabilities", () => {
   /** Boot a fresh owner and spawn through the registry with forged options. */
-  function forge(options: Record<string, unknown>) {
+  async function forge(options: Record<string, unknown>) {
     delete (globalThis as any)[MANAGER_KEY];
     const root = makePi();
-    subagentsExtension(root.pi);
+    await subagentsExtension(root.pi);
     vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}) as any);
     const entry = (globalThis as any)[MANAGER_KEY];
     const id = entry.spawn(root.pi, ctx(), "general-purpose", "go", {
@@ -131,7 +131,7 @@ describe("the registry spawn strips internal capabilities", () => {
   it("refuses a forged nesting, so the agent cannot hide under someone else's id", async () => {
     // A nested record is filtered out of every top-level surface and inherits
     // its parent's delegation budget.
-    const { entry, id, root } = forge({ parentAgentId: "victim-agent-id", depth: 9, maxSubagentDepth: 99 });
+    const { entry, id, root } = await forge({ parentAgentId: "victim-agent-id", depth: 9, maxSubagentDepth: 99 });
 
     expect(entry.getRecord(id)).toMatchObject({
       parentAgentId: undefined, depth: 1, maxSubagentDepth: undefined,
@@ -142,7 +142,7 @@ describe("the registry spawn strips internal capabilities", () => {
   it("refuses a forged transcript directory and config root", async () => {
     // rootSessionId names a directory the transcript is written into, and
     // configCwd names where agent files and memory are resolved from.
-    const { entry, id, root, runOpts } = forge({ rootSessionId: "../../elsewhere", configCwd: "/etc" });
+    const { entry, id, root, runOpts } = await forge({ rootSessionId: "../../elsewhere", configCwd: "/etc" });
 
     expect(entry.getRecord(id).rootSessionId).toBeUndefined();
     expect(runOpts().configCwd).toBeUndefined();
@@ -150,7 +150,7 @@ describe("the registry spawn strips internal capabilities", () => {
   });
 
   it("refuses a forged session file, which would replay someone else's conversation", async () => {
-    const { root, runOpts } = forge({ resumeSessionFile: "/home/victim/.pi/agent/sessions/private.jsonl" });
+    const { root, runOpts } = await forge({ resumeSessionFile: "/home/victim/.pi/agent/sessions/private.jsonl" });
 
     expect(runOpts().resumeSessionFile).toBeUndefined();
     await root.lifecycle.get("session_shutdown")?.();
@@ -159,7 +159,7 @@ describe("the registry spawn strips internal capabilities", () => {
   it("refuses a forged reclaim and allocates a handle the ordinary way", async () => {
     // reclaim bypasses assignHandle, so a forged value could duplicate a live
     // agent's name and make `@handle` resolve to either of two records.
-    const { entry, id, root } = forge({ reclaim: { handle: "explore", alias: "auth-audit" } });
+    const { entry, id, root } = await forge({ reclaim: { handle: "explore", alias: "auth-audit" } });
 
     expect(entry.getRecord(id)).toMatchObject({ handle: "general-purpose", alias: undefined });
     await root.lifecycle.get("session_shutdown")?.();

@@ -76,7 +76,7 @@ describe("status note reaches the parent through the real handlers", () => {
       steered: false,
     });
     const { pi, tools } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
 
     const res = await tools.get("Agent").execute(
       "tc1",
@@ -112,7 +112,7 @@ describe("status note reaches the parent through the real handlers", () => {
     vi.mocked(runAgent).mockReturnValue(new Promise((r) => { finish = r; }) as any);
 
     const { pi, tools } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
 
     const parent = new AbortController();
     const call = tools.get("Agent").execute(
@@ -151,7 +151,7 @@ describe("status note reaches the parent through the real handlers", () => {
       steered: false,
     });
     const { pi, tools } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     const registry = (globalThis as any)[Symbol.for("pi-subagents:manager")];
 
     // External registry/RPC callers cannot mint internal ownership metadata.
@@ -203,7 +203,7 @@ describe("status note reaches the parent through the real handlers", () => {
     // A background agent that never settles on its own — only a stop ends it.
     vi.mocked(runAgent).mockReturnValue(new Promise(() => {}) as any);
     const { pi, tools, eventHandlers, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     await bind(lifecycle); // register RPC channels via session_start (#142)
 
     const spawn = await tools.get("Agent").execute(
@@ -251,7 +251,7 @@ describe("subagents:compacted", () => {
   it("emits the documented payload when a top-level agent's session compacts", async () => {
     runWithCompaction({ reason: "threshold", tokensBefore: 12345 });
     const { pi, tools } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
 
     await tools.get("Agent").execute(
       "tc-compact",
@@ -276,7 +276,7 @@ describe("subagents:compacted", () => {
       return { responseText: "done", session: { dispose: vi.fn() } as any, aborted: false, steered: false };
     });
     const { pi, tools } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
 
     await tools.get("Agent").execute(
       "tc-compact2",
@@ -295,7 +295,7 @@ describe("subagents:compacted", () => {
     // would spam the parent session's bus with ids no consumer can resolve.
     runWithCompaction({ reason: "threshold", tokensBefore: 999 });
     const { pi, tools } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
 
     await tools.get("Agent").execute(
       "tc-parent",

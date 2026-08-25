@@ -17,9 +17,9 @@ import subagentsExtension from "../src/index.js";
 import { ctx, type Hermetic, hermeticDir, makePi } from "./helpers/boot-extension.js";
 
 /** Boot the real extension and hand back its `/agents` command. */
-function bootCommand() {
+async function bootCommand() {
   const booted = makePi();
-  subagentsExtension(booted.pi);
+  await subagentsExtension(booted.pi);
   const command = booted.commands.get("agents");
   if (!command) throw new Error("the extension did not register /agents");
   return { ...booted, command };
@@ -91,16 +91,16 @@ describe("/agents → Workflows", () => {
   beforeEach(() => { hermetic = hermeticDir({ settings: { workflowsEnabled: true } }); });
   afterEach(() => { hermetic.restore(); });
 
-  it("registers no top-level /workflows command", () => {
+  it("registers no top-level /workflows command", async () => {
     // It lives under /agents instead, deliberately: pi renames a duplicate
     // command to `/workflows:1` and `/workflows:2`, which breaks the bare name
     // for both extensions. Pinned because re-adding it would be silent.
-    const booted = bootCommand();
+    const booted = await bootCommand();
     expect(booted.commands.has("workflows")).toBe(false);
   });
 
   it("offers the entry in the agents menu", async () => {
-    const { command } = bootCommand();
+    const { command } = await bootCommand();
     const ui = commandCtx();
 
     await command.handler("", ui.context);
@@ -111,7 +111,7 @@ describe("/agents → Workflows", () => {
   it("hides the entry when workflows are off", async () => {
     hermetic.restore();
     hermetic = hermeticDir({ settings: { workflowsEnabled: false } });
-    const { command } = bootCommand();
+    const { command } = await bootCommand();
     const ui = commandCtx();
 
     await command.handler("", ui.context);
@@ -122,7 +122,7 @@ describe("/agents → Workflows", () => {
   });
 
   it("says so when the session has no workflows", async () => {
-    const { command } = bootCommand();
+    const { command } = await bootCommand();
     const ui = commandCtx();
     await command.handler("", ui.context);
     expect(ui.notes.map(n => n.text).join("\n")).toMatch(/No workflows/i);
@@ -131,7 +131,7 @@ describe("/agents → Workflows", () => {
   });
 
   it("does not prompt for a choice when there is nothing to choose", async () => {
-    const { command } = bootCommand();
+    const { command } = await bootCommand();
     const ui = commandCtx();
     await command.handler("", ui.context);
     expect(ui.askedWhichRun()).toBe(false);
@@ -143,7 +143,7 @@ describe("/agents → Workflows", () => {
 
     /** Boot, then start `count` workflows so the session has tasks to inspect. */
     async function withRuns(count: number) {
-      const booted = bootCommand();
+      const booted = await bootCommand();
       const runCtx = ctx({ cwd: hermetic.dir });
       for (let i = 0; i < count; i++) {
         await booted.tools.get("SubagentWorkflow").execute(`tc-${i}`, { script: script(`wf-${i}`) }, undefined, undefined, runCtx);

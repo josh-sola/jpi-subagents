@@ -25,18 +25,12 @@ import { readJournal } from "../../src/workflow/journal.js";
 import { runPrintMode } from "../helpers/print-mode-runner.js";
 
 /**
- * A project directory with workflows switched on.
- *
- * Workflows are opt-in, and the switch is read at extension load — so it has to
- * be on disk before the run boots, exactly as it would be for a real project
- * that turned the feature on once. Without this the tool is never registered
- * and the parent model has nothing to call.
+ * A project directory to run workflows in. Workflows default to on (unpinned
+ * "auto" — see settings.ts), so no settings need to be written for the tool
+ * to register; this just gives each test its own temp cwd.
  */
 function workflowProject(): string {
-  const dir = mkdtempSync(join(tmpdir(), "subagents-wf-e2e-"));
-  mkdirSync(join(dir, ".pi"), { recursive: true });
-  writeFileSync(join(dir, ".pi", "subagents.json"), JSON.stringify({ workflowsEnabled: true }));
-  return dir;
+  return mkdtempSync(join(tmpdir(), "subagents-wf-e2e-"));
 }
 
 /** A `SubagentWorkflow` tool call, the way the parent model would emit one. */
@@ -154,9 +148,9 @@ describe("Workflow end to end", () => {
     // link — resolution, nesting, the injected tool, validation, the realm
     // parse — has to hold or this fails.
     const cwd = workflowProject();
-    mkdirSync(join(cwd, ".pi", "workflows"), { recursive: true });
+    mkdirSync(join(cwd, ".agents", "workflows"), { recursive: true });
     writeFileSync(
-      join(cwd, ".pi", "workflows", "child.js"),
+      join(cwd, ".agents", "workflows", "child.js"),
       [
         'export const meta = { name: "child", description: "the nested one" };',
         'const found = await agent("NESTED-TASK-MARKER", {',
@@ -167,7 +161,7 @@ describe("Workflow end to end", () => {
       ].join("\n"),
     );
     writeFileSync(
-      join(cwd, ".pi", "workflows", "parent.js"),
+      join(cwd, ".agents", "workflows", "parent.js"),
       [
         'export const meta = { name: "parent", description: "the outer one" };',
         'const count = await workflow("child", { depth: 1 });',

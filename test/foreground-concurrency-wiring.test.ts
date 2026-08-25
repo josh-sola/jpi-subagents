@@ -42,12 +42,12 @@ afterEach(async () => {
 });
 
 /** Boot the real extension with foreground concurrency pinned to one slot. */
-function boot(settings: Record<string, unknown> = {}) {
+async function boot(settings: Record<string, unknown> = {}) {
   hermetic = hermeticDir({
     settings: { outputTranscript: false, maxConcurrentForeground: 1, ...settings },
   });
   const b = makePi();
-  subagentsExtension(b.pi);
+  await subagentsExtension(b.pi);
   booted = b.lifecycle;
   return b;
 }
@@ -91,7 +91,7 @@ function callForeground(tools: Map<string, any>, prompt: string, opts: {
 
 describe("maxConcurrentForeground, through the Agent tool", () => {
   it("runs blocking calls one at a time and returns each its own result", async () => {
-    const { tools } = boot();
+    const { tools } = await boot();
     const resolvers = controllableRuns();
 
     const first = callForeground(tools, "alpha");
@@ -113,7 +113,7 @@ describe("maxConcurrentForeground, through the Agent tool", () => {
   // The Promise.all constraint. A queued agent aborted by Esc must come back as
   // an ordinary stopped result, not as a throw that would take the batch down.
   it("resolves a queued call as STOPPED when the turn is interrupted", async () => {
-    const { tools } = boot();
+    const { tools } = await boot();
     const resolvers = controllableRuns();
 
     const controller = new AbortController();
@@ -138,7 +138,7 @@ describe("maxConcurrentForeground, through the Agent tool", () => {
   // for minutes. The row keeps its spinner either way — a status the renderer
   // does not know falls through to raw text and reads as hung.
   it("says it is queued in the live tool result, then stops saying it", async () => {
-    const { tools } = boot();
+    const { tools } = await boot();
     const resolvers = controllableRuns();
 
     const firstUpdates: any[] = [];
@@ -165,7 +165,7 @@ describe("maxConcurrentForeground, through the Agent tool", () => {
   });
 
   it("leaves blocking calls unbounded when the setting is unset", async () => {
-    const { tools } = boot({ maxConcurrentForeground: 0 });
+    const { tools } = await boot({ maxConcurrentForeground: 0 });
     const resolvers = controllableRuns();
 
     const calls = ["a", "b", "c"].map(p => callForeground(tools, p));

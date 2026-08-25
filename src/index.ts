@@ -17,7 +17,7 @@ import { Container, Key, matchesKey, type SettingItem, SettingsList, Spacer, Tex
 import { Type } from "@sinclair/typebox";
 import { abortable } from "./abortable.js";
 import { hasAgentBadge, renderAgentName } from "./agent-color.js";
-import { buildNewAgentFile, disableInContent, enableInContent, isEmptyStub, locateAgentFile, personalAgentsDir, projectAgentsDir, serializeAgentFile } from "./agent-file-toggle.js";
+import { buildNewAgentFile, disableInContent, enableInContent, isEmptyStub, locateAgentFile, personalAgentsDir, serializeAgentFile } from "./agent-file-toggle.js";
 import { AgentManager, isTopLevelAgent } from "./agent-manager.js";
 import { getAgentConversation, getDefaultMaxTurns, getGraceTurns, getRememberAgents, normalizeMaxTurns, resolveEffectiveMaxTurns, SUBAGENT_TOOL_NAMES, setDefaultMaxTurns, setGraceTurns, setRememberAgents, steerAgent } from "./agent-runner.js";
 import { BUILTIN_TOOL_NAMES, getAgentConfig, getAllTypes, getAvailableTypes, getConfig, getFallbackSubagent, isDefaultsDisabled, NO_FALLBACK, registerAgents, resolveSpawnType, resolveType, setDefaultsDisabled, setFallbackSubagent } from "./agent-types.js";
@@ -34,7 +34,7 @@ import { getMaxSubagentDepth, setMaxSubagentDepth } from "./nested-tools.js";
 import { createOutputFilePath, ensureOutputFile, getOutputTranscriptDefault, sessionTaskDir, setOutputTranscriptDefault, streamToOutputFile, writeInitialEntry } from "./output-file.js";
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
-import { applyAndEmitLoaded, loadSettings, type SubagentsSettings, saveAndEmitChanged, type ToolDescriptionMode } from "./settings.js";
+import { applySettings, createSubagentsConfig, loadSubagentsSettings, type SubagentsSettings, saveAndEmitChanged, type ToolDescriptionMode } from "./settings.js";
 import { getForegroundOutcomeNote, getStatusNote, partialOutputSuffix } from "./status-note.js";
 import { type AgentConfig, type AgentInvocation, type AgentMentionMode, type AgentRecord, type JoinMode, type NotificationDetails, type SubagentType, type ViewerMarkdownMode, type WidgetMode } from "./types.js";
 import { createMentionProvider, mentionRoster, type TypeInfo } from "./ui/agent-mention.js";
@@ -267,7 +267,7 @@ function buildNotificationDetails(record: AgentRecord, resultMaxLen: number, act
  *   Rendering both "*" tells the orchestrator a tool-less agent can run `bash`.
  * - empty-with-extensions vs empty-without. Zero built-ins does NOT imply zero
  *   tools: `tools: none` alongside `extensions:` still surfaces every extension
- *   tool (see test/fixtures/.pi/agents/tools-none.md, which expects three). Calling
+ *   tool (see test/fixtures/.agents/agents/tools-none.md, which expects three). Calling
  *   that "none" understates the agent instead of overstating it — better, but still
  *   wrong, and it would route work away from the only agent able to do it. "none"
  *   is therefore reserved for agents that genuinely can call nothing: `isolated`
@@ -298,7 +298,7 @@ export const WORKFLOW_FILE_FLAG = "subagents-workflow-file";
  */
 export { FOREIGN_WORKFLOW_TOOL_NAMES, WORKFLOW_ENTRY_TYPE, type WorkflowEntryData, workflowEntryData };
 
-export default function (pi: ExtensionAPI) {
+export default async function (pi: ExtensionAPI) {
   // Child AgentSessions load normal extensions. Re-entering this extension there
   // would create another manager and leak handlers. Nested orchestration is
   // injected as scoped custom tools by the existing manager instead.
@@ -388,9 +388,15 @@ export default function (pi: ExtensionAPI) {
       "Use the `=` form — the space form consumes the next argument, which would swallow a following prompt.",
   });
 
-  // Read directly rather than waiting for applyAndEmitLoaded below: this decides
-  // the initial load, which happens hundreds of lines before settings are applied.
-  let strictAgentFiles = loadSettings(process.cwd()).strictAgentFiles === true;
+  // Loaded once, up front, since Config.load() is async and this decides the
+  // initial (only strict) custom-agent load below — hundreds of lines before
+  // the rest of this value is applied, once every setter closure it needs
+  // exists (see the applySettings call further down, which reuses this same
+  // value rather than reading jpi.kdl a second time).
+  const subagentsConfig = createSubagentsConfig();
+  const { value: loadedSettings, issues: settingsLoadIssues } = await loadSubagentsSettings(subagentsConfig);
+  for (const issue of settingsLoadIssues) console.warn(`[pi-subagents] ${issue}`);
+  let strictAgentFiles = loadedSettings.strictAgentFiles;
 
   /** Reload agents from project/global custom agent dirs and merge with defaults (called on init and each Agent invocation). */
   const reloadCustomAgents = (strict = false) => {
@@ -440,7 +446,7 @@ export default function (pi: ExtensionAPI) {
    */
   function chooseViewerMarkdown(mode: ViewerMarkdownMode, ctx?: ExtensionCommandContext): void {
     setViewerMarkdown(mode);
-    persistSettings(ctx, `Viewer markdown set to ${mode}`);
+    void persistSettings(ctx, `Viewer markdown set to ${mode}`);
   }
   const pendingUsage = new PendingUsagePool();
 
@@ -771,13 +777,13 @@ export default function (pi: ExtensionAPI) {
     try {
       const sessionId = ctx.sessionManager?.getSessionId?.();
       if (!sessionId) return;  // sessionId not yet available — try again on next event
-      const path = resolveStorePath(ctx.cwd, sessionId);
+      const path = resolveStorePath(sessionId);
       const store = new ScheduleStore(path);
       scheduler.start(pi, ctx, manager, store);
       pi.events.emit("subagents:scheduler_ready", { sessionId, jobCount: store.list().length });
     } catch (err) {
       // Scheduling is non-essential — log and move on so the rest of the
-      // extension keeps working if e.g. .pi/ is unwritable.
+      // extension keeps working if the agent dir is unwritable.
       console.warn("[pi-subagents] Failed to start scheduler:", err);
     }
   }
@@ -1186,7 +1192,7 @@ export default function (pi: ExtensionAPI) {
   // there is no second door into the same machinery.
   //
   // `workflowsPinned` records that the answer came from the user — a boolean in
-  // subagents.json, or the settings toggle — rather than from this default. It
+  // jpi.kdl, or the settings toggle — rather than from this default. It
   // is what `resolveWorkflowCollisions` checks before yielding to another
   // extension's workflow tool: a default may be overridden by what else is
   // loaded, an explicit choice may not.
@@ -1203,7 +1209,7 @@ export default function (pi: ExtensionAPI) {
   // When enabled, the three hardcoded default agents (general-purpose, Explore,
   // Plan) are not registered. User-defined agents from project/global custom
   // agent dirs are completely unaffected — only DEFAULT_AGENTS are suppressed.
-  // Defaults to false; opt-in via `/agents → Settings` or subagents.json.
+  // Defaults to false; opt-in via `/agents → Settings` or jpi.kdl.
   // State lives in agent-types.ts (isDefaultsDisabled) because registerAgents
   // needs it; this wrapper just re-registers after flipping it.
   function setDisableDefaultAgents(b: boolean): void {
@@ -1396,38 +1402,38 @@ export default function (pi: ExtensionAPI) {
     return name.replace(/-\d{8}$/, "");
   }
 
-  // Apply persisted settings on startup and emit `subagents:settings_loaded`.
-  // Global + project merged; missing → defaults; corrupt file emits a warning
-  // to stderr and falls back to defaults.
-  applyAndEmitLoaded(
-    {
-      setMaxConcurrent: (n) => manager.setMaxConcurrent(n),
-      setMaxConcurrentForeground: (n) => manager.setMaxConcurrentForeground(n),
-      setDefaultMaxTurns,
-      setGraceTurns,
-      setDefaultJoinMode,
-      setBackgroundByDefault,
-      setSchedulingEnabled,
-      setScopeModels: setScopeModelsEnabled,
-      setStrictAgentFiles: (b) => { strictAgentFiles = b; },
-      setDisableDefaultAgents: setDisableDefaultAgents,
-      setToolDescriptionMode: setToolDescriptionMode,
-      setFleetView: setFleetViewEnabled,
-      setAgentMentions: setAgentMentionMode,
-      setRememberAgents,
-      setWidgetMode: setWidgetMode,
-      setOutputTranscript: setOutputTranscriptDefault,
-      setWorktreeIsolation: setWorktreeIsolationEnabled,
-      setWorkflowsEnabled: setWorkflowsEnabled,
-      setMaxSubagentDepth: setMaxSubagentDepth,
-      setFallbackSubagent: setFallbackSubagent,
-      setReportUsage,
-      setShowCost,
-      setShowModel,
-      setViewerMarkdown,
-    },
-    (event, payload) => pi.events.emit(event, payload),
-  );
+  // Apply the settings loaded at the top of this function (before the initial
+  // custom-agent load) and emit `subagents:settings_loaded`. Every field is
+  // always present — Config.load() fills in defaults for anything jpi.kdl
+  // doesn't set; a corrupt jpi.kdl already warned to stderr above and fell
+  // back to defaults.
+  applySettings(loadedSettings, {
+    setMaxConcurrent: (n) => manager.setMaxConcurrent(n),
+    setMaxConcurrentForeground: (n) => manager.setMaxConcurrentForeground(n),
+    setDefaultMaxTurns,
+    setGraceTurns,
+    setDefaultJoinMode,
+    setBackgroundByDefault,
+    setSchedulingEnabled,
+    setScopeModels: setScopeModelsEnabled,
+    setStrictAgentFiles: (b) => { strictAgentFiles = b; },
+    setDisableDefaultAgents: setDisableDefaultAgents,
+    setToolDescriptionMode: setToolDescriptionMode,
+    setFleetView: setFleetViewEnabled,
+    setAgentMentions: setAgentMentionMode,
+    setRememberAgents,
+    setWidgetMode: setWidgetMode,
+    setOutputTranscript: setOutputTranscriptDefault,
+    setWorktreeIsolation: setWorktreeIsolationEnabled,
+    setWorkflowsEnabled: setWorkflowsEnabled,
+    setMaxSubagentDepth: setMaxSubagentDepth,
+    setFallbackSubagent: setFallbackSubagent,
+    setReportUsage,
+    setShowCost,
+    setShowModel,
+    setViewerMarkdown,
+  });
+  pi.events.emit("subagents:settings_loaded", { settings: loadedSettings });
 
   // ---- Agent tool ----
 
@@ -1474,7 +1480,7 @@ export default function (pi: ExtensionAPI) {
   const compactAgentToolDescription = `Launch an autonomous agent for complex, multi-step tasks. Agent types:
 ${buildCompactTypeListText()}
 
-Custom agents: .pi/agents/<name>.md (project) or ${getAgentDir()}/agents/<name>.md (global).
+Custom agents: .agents/agents/<name>.md (project) or ${getAgentDir()}/agents/<name>.md (global).
 
 Notes:
 - description: 3-5 words (shown in UI). Prompts must be self-contained — the agent has not seen this conversation.
@@ -1488,7 +1494,7 @@ Notes:
 Available agent types and the tools they have access to:
 ${buildTypeListText()}
 
-Custom agents can be defined in .pi/agents/<name>.md (project) or ${getAgentDir()}/agents/<name>.md (global) — they are picked up automatically. Project-level agents override global ones. Creating a .md file with the same name as a default agent overrides it.
+Custom agents can be defined in .agents/agents/<name>.md (project) or ${getAgentDir()}/agents/<name>.md (global) — they are picked up automatically. Workspace-level agents override global ones. Creating a .md file with the same name as a default agent overrides it.
 
 When using the Agent tool, specify a subagent_type parameter to select which agent type to use.
 
@@ -1527,9 +1533,9 @@ Terse command-style prompts produce shallow, generic work.
 **Never delegate understanding.** Don't write "based on your findings, fix the bug" or "based on the research, implement it." Those phrases push synthesis onto the agent instead of doing it yourself. Write prompts that prove you understood: include file paths, line numbers, what specifically to change.`;
 
   // `toolDescriptionMode: "custom"` — user-authored description with live
-  // dynamic parts. Project file wins over global; missing/empty falls back to
-  // "full" (a stale fallback beats a blank tool description). Only the prose
-  // is customizable — the parameter schema stays code-owned.
+  // dynamic parts; missing/empty falls back to "full" (a stale fallback beats
+  // a blank tool description). Only the prose is customizable — the parameter
+  // schema stays code-owned.
   const renderToolDescriptionTemplate = (template: string): string => {
     const vars: Record<string, () => string> = {
       typeList: buildTypeListText,
@@ -1547,18 +1553,14 @@ Terse command-style prompts produce shallow, generic work.
   };
 
   const loadCustomToolDescription = (): string | undefined => {
-    for (const path of [
-      join(process.cwd(), ".pi", "agent-tool-description.md"),
-      join(getAgentDir(), "agent-tool-description.md"),
-    ]) {
-      try {
-        if (!existsSync(path)) continue;
-        const text = readFileSync(path, "utf-8").trim();
-        if (text) return renderToolDescriptionTemplate(text);
-        console.warn(`[pi-subagents] ${path} is empty — ignoring`);
-      } catch (err) {
-        console.warn(`[pi-subagents] failed to read ${path}: ${err instanceof Error ? err.message : String(err)}`);
-      }
+    const path = join(getAgentDir(), "agent-tool-description.md");
+    try {
+      if (!existsSync(path)) return undefined;
+      const text = readFileSync(path, "utf-8").trim();
+      if (text) return renderToolDescriptionTemplate(text);
+      console.warn(`[pi-subagents] ${path} is empty — ignoring`);
+    } catch (err) {
+      console.warn(`[pi-subagents] failed to read ${path}: ${err instanceof Error ? err.message : String(err)}`);
     }
     return undefined;
   };
@@ -1602,7 +1604,7 @@ Terse command-style prompts produce shallow, generic work.
         }),
       ),
       subagent_type: Type.String({
-        description: `The type of specialized agent to use. Available types: ${getAvailableTypes().join(", ")}. Custom agents from .pi/agents/*.md (project) or ${getAgentDir()}/agents/*.md (global) are also available.`,
+        description: `The type of specialized agent to use. Available types: ${getAvailableTypes().join(", ")}. Custom agents from .agents/agents/*.md (project) or ${getAgentDir()}/agents/*.md (global) are also available.`,
       }),
       model: Type.Optional(
         Type.String({
@@ -2430,7 +2432,7 @@ Terse command-style prompts produce shallow, generic work.
       name: Type.Optional(
         Type.String({
           description:
-            "Name of a saved workflow — `<name>.js` in .pi/workflows/, .agents/workflows/ or the user's agent dir. Lowest precedence: `scriptPath` and `script` both win over it.",
+            "Name of a saved workflow — `<name>.js` in .agents/workflows/ or the user's agent dir. Lowest precedence: `scriptPath` and `script` both win over it.",
         }),
       ),
       args: Type.Optional(
@@ -2673,7 +2675,7 @@ Terse command-style prompts produce shallow, generic work.
     if (!isWorkflowsEnabled()) {
       report(
         `--${WORKFLOW_FILE_FLAG} ignored: workflows are off. Turn them on in /agents → Settings → Workflows, ` +
-          'or set `"workflowsEnabled": true` in .pi/subagents.json.',
+          'or set `workflows-enabled #true` in the `subagents { }` jpi.kdl section.',
         "warning",
       );
       return;
@@ -3147,13 +3149,7 @@ Terse command-style prompts produce shallow, generic work.
 
   /** Eject a default agent: write its embedded config as a .md file. */
   async function ejectAgent(ctx: ExtensionCommandContext, name: string, cfg: AgentConfig) {
-    const location = await ctx.ui.select("Choose location", [
-      "Project (.pi/agents/)",
-      `Personal (${personalAgentsDir()})`,
-    ]);
-    if (!location) return;
-
-    const targetDir = location.startsWith("Project") ? projectAgentsDir() : personalAgentsDir();
+    const targetDir = personalAgentsDir();
     mkdirSync(targetDir, { recursive: true });
 
     const targetPath = join(targetDir, `${name}.md`);
@@ -3195,13 +3191,7 @@ Terse command-style prompts produce shallow, generic work.
     }
 
     // No file (built-in default) — create a stub
-    const location = await ctx.ui.select("Choose location", [
-      "Project (.pi/agents/)",
-      `Personal (${personalAgentsDir()})`,
-    ]);
-    if (!location) return;
-
-    const targetDir = location.startsWith("Project") ? projectAgentsDir() : personalAgentsDir();
+    const targetDir = personalAgentsDir();
     mkdirSync(targetDir, { recursive: true });
 
     const targetPath = join(targetDir, `${name}.md`);
@@ -3239,13 +3229,7 @@ Terse command-style prompts produce shallow, generic work.
   }
 
   async function showCreateWizard(ctx: ExtensionCommandContext) {
-    const location = await ctx.ui.select("Choose location", [
-      "Project (.pi/agents/)",
-      `Personal (${personalAgentsDir()})`,
-    ]);
-    if (!location) return;
-
-    const targetDir = location.startsWith("Project") ? projectAgentsDir() : personalAgentsDir();
+    const targetDir = personalAgentsDir();
 
     const method = await ctx.ui.select("Creation method", [
       "Generate with Claude (recommended)",
@@ -3426,13 +3410,11 @@ Write the file using the write tool. Only write the file, nothing else.`;
   }
 
   /**
-   * Every settings mutation writes this WHOLE object back to disk, so a field
-   * missing here is erased from the user's subagents.json the next time they
-   * toggle something unrelated. `SubagentsSettings` has every field optional,
-   * so a `: SubagentsSettings` return annotation would let a newly-added setting
-   * be forgotten here and still type-check. `satisfies` instead: it still checks
-   * each value's type and rejects a mistyped key, but leaves the return type
-   * inferred so `_NoMissingSettingsKeys` below can check completeness.
+   * Every settings mutation writes this whole object through `Config.save`,
+   * which only touches the keys present — so a field missing here just never
+   * gets saved (its default keeps whatever jpi.kdl already has), not erased.
+   * `satisfies` (not a `: SubagentsSettings` annotation) keeps the return type
+   * inferred, so `_NoMissingSettingsKeys` below still has something to check.
    */
   function snapshotSettings() {
     return {
@@ -3457,19 +3439,15 @@ Write the file using the write tool. Only write the file, nothing else.`;
       outputTranscript: getOutputTranscriptDefault(),
       worktreeIsolation: isWorktreeIsolationEnabled(),
       // The user's answer, not the effective one. A stand-down for another
-      // extension's workflow tool is scoped to the session it was detected in;
-      // writing it here would let an unrelated settings change three menus away
-      // freeze it into the file as an explicit `false`, which then survives
-      // uninstalling the extension it was deferring to. undefined is dropped by
-      // JSON.stringify, so unset stays unset — same reasoning as
-      // `fallbackSubagent` below.
-      workflowsEnabled: isWorkflowsPinned() ? isWorkflowsEnabled() : undefined,
+      // extension's workflow tool is scoped to the session that detected the
+      // collision; "auto" (the schema default) leaves that scoped decision
+      // alone instead of freezing today's yield/no-yield verdict into jpi.kdl.
+      workflowsEnabled: isWorkflowsPinned() ? isWorkflowsEnabled() : "auto",
       maxSubagentDepth: getMaxSubagentDepth(),
-      // Deliberately NOT `?? "general-purpose"`: every settings change writes the
-      // whole snapshot, and materializing the implicit default would turn it into
-      // explicit configuration — which then fails loudly if general-purpose later
-      // goes away. undefined is dropped by JSON.stringify.
-      fallbackSubagent: getFallbackSubagent(),
+      // `false` is the KDL spelling of the NO_FALLBACK sentinel — the reverse
+      // of applySettings' mapping. `?? "general-purpose"` only matters before
+      // the first load populates this; the schema default is the same value.
+      fallbackSubagent: getFallbackSubagent() === NO_FALLBACK ? false : (getFallbackSubagent() ?? "general-purpose"),
       reportUsage: isReportUsageEnabled(),
       showCost: isShowCostEnabled(),
       showModel: isShowModelEnabled(),
@@ -3679,7 +3657,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
         {
           id: "toolDescriptionMode",
           label: "Tool description",
-          description: "Agent tool description sent to the LLM: full (rich, default), compact (~75% fewer tokens, for small/local models), or custom (.pi/agent-tool-description.md with {{placeholders}})",
+          description: "Agent tool description sent to the LLM: full (rich, default), compact (~75% fewer tokens, for small/local models), or custom (<agent dir>/agent-tool-description.md with {{placeholders}})",
           currentValue: getToolDescriptionMode(),
           values: ["full", "compact", "custom"],
         },
@@ -3691,14 +3669,14 @@ Write the file using the write tool. Only write the file, nothing else.`;
         const n = parseInt(value, 10);
         if (n >= 1) {
           manager.setMaxConcurrent(n);
-          notifyApplied(ctx, `Max concurrency set to ${n}`);
+          void notifyApplied(ctx, `Max concurrency set to ${n}`);
         }
       } else if (id === "maxConcurrentForeground") {
         // 0 is meaningful here, unlike maxConcurrent above: it means unlimited.
         const n = parseInt(value, 10);
         if (n >= 0) {
           manager.setMaxConcurrentForeground(n);
-          notifyApplied(ctx, n === 0
+          void notifyApplied(ctx, n === 0
             ? "Max foreground concurrency set to unlimited"
             : `Max foreground concurrency set to ${n}`);
         }
@@ -3706,22 +3684,22 @@ Write the file using the write tool. Only write the file, nothing else.`;
         const n = parseInt(value, 10);
         if (n === 0) {
           setDefaultMaxTurns(undefined);
-          notifyApplied(ctx, "Default max turns set to unlimited");
+          void notifyApplied(ctx, "Default max turns set to unlimited");
         } else if (n >= 1) {
           setDefaultMaxTurns(n);
-          notifyApplied(ctx, `Default max turns set to ${n}`);
+          void notifyApplied(ctx, `Default max turns set to ${n}`);
         }
       } else if (id === "graceTurns") {
         const n = parseInt(value, 10);
         if (n >= 1) {
           setGraceTurns(n);
-          notifyApplied(ctx, `Grace turns set to ${n}`);
+          void notifyApplied(ctx, `Grace turns set to ${n}`);
         }
       } else if (id === "maxSubagentDepth") {
         const n = parseInt(value, 10);
         if (n >= 0) {
           setMaxSubagentDepth(n);
-          notifyApplied(
+          void notifyApplied(
             ctx,
             n <= 1
               ? "Nested delegation disabled"
@@ -3730,11 +3708,11 @@ Write the file using the write tool. Only write the file, nothing else.`;
         }
       } else if (id === "joinMode") {
         setDefaultJoinMode(value as JoinMode);
-        notifyApplied(ctx, `Default join mode set to ${value}`);
+        void notifyApplied(ctx, `Default join mode set to ${value}`);
       } else if (id === "backgroundByDefault") {
         const enabled = value === "on";
         setBackgroundByDefault(enabled);
-        notifyApplied(
+        void notifyApplied(
           ctx,
           enabled
             ? "Agent calls run in the background unless they pass run_in_background: false"
@@ -3747,7 +3725,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
         } else {
           setSchedulingEnabled(enabled);
           if (!enabled) scheduler.stop();  // immediate kill — outstanding fires stop ticking
-          notifyApplied(
+          void notifyApplied(
             ctx,
             `Scheduling ${enabled ? "enabled" : "disabled"}. Tool spec change takes effect on next pi session.`,
           );
@@ -3761,7 +3739,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
           // Runs already in flight keep going: the switch governs whether the
           // tool is offered, and killing live agents on a settings toggle would
           // lose work the user never asked to discard.
-          notifyApplied(
+          void notifyApplied(
             ctx,
             `Workflows ${enabled ? "enabled" : "disabled"}. Tool spec change takes effect on next pi session.`,
           );
@@ -3769,18 +3747,18 @@ Write the file using the write tool. Only write the file, nothing else.`;
       } else if (id === "scopeModels") {
         const enabled = value === "on";
         setScopeModelsEnabled(enabled);
-        notifyApplied(ctx, `Scope models ${enabled ? "enabled" : "disabled"}`);
+        void notifyApplied(ctx, `Scope models ${enabled ? "enabled" : "disabled"}`);
       } else if (id === "strictAgentFiles") {
         const enabled = value === "on";
         strictAgentFiles = enabled;
-        notifyApplied(ctx, `Strict agent files ${enabled ? "enabled" : "disabled"}. Takes effect on next pi session.`);
+        void notifyApplied(ctx, `Strict agent files ${enabled ? "enabled" : "disabled"}. Takes effect on next pi session.`);
       } else if (id === "disableDefaultAgents") {
         const enabled = value === "on";
         setDisableDefaultAgents(enabled);
-        notifyApplied(ctx, `Default agents ${enabled ? "disabled" : "enabled"}. Tool spec change takes effect on next pi session.`);
+        void notifyApplied(ctx, `Default agents ${enabled ? "disabled" : "enabled"}. Tool spec change takes effect on next pi session.`);
       } else if (id === "fallbackSubagent") {
         setFallbackSubagent(value);
-        notifyApplied(
+        void notifyApplied(
           ctx,
           value === NO_FALLBACK
             ? "Unknown or disabled agent types will now be rejected"
@@ -3789,23 +3767,23 @@ Write the file using the write tool. Only write the file, nothing else.`;
       } else if (id === "outputTranscript") {
         const enabled = value === "on";
         setOutputTranscriptDefault(enabled);
-        notifyApplied(ctx, `Output transcript ${enabled ? "enabled" : "disabled"} by default`);
+        void notifyApplied(ctx, `Output transcript ${enabled ? "enabled" : "disabled"} by default`);
       } else if (id === "worktreeIsolation") {
         const enabled = value === "on";
         setWorktreeIsolationEnabled(enabled);
         // The refusal is live, but the tool schema is built at registration, so
         // the isolation parameter only appears/disappears next session.
-        notifyApplied(
+        void notifyApplied(
           ctx,
           `Worktree isolation ${enabled ? "enabled" : "disabled"}. Tool parameter updates on next pi session.`,
         );
       } else if (id === "toolDescriptionMode") {
         setToolDescriptionMode(value as ToolDescriptionMode);
-        notifyApplied(ctx, `Tool description set to ${value}. Takes effect on next pi session.`);
+        void notifyApplied(ctx, `Tool description set to ${value}. Takes effect on next pi session.`);
       } else if (id === "reportUsage") {
         const enabled = value === "on";
         setReportUsage(enabled);
-        notifyApplied(
+        void notifyApplied(
           ctx,
           enabled
             ? "Subagent usage now counted in this session's totals"
@@ -3814,22 +3792,22 @@ Write the file using the write tool. Only write the file, nothing else.`;
       } else if (id === "showCost") {
         const enabled = value === "on";
         setShowCost(enabled);
-        notifyApplied(ctx, `Cost display ${enabled ? "enabled" : "disabled"}`);
+        void notifyApplied(ctx, `Cost display ${enabled ? "enabled" : "disabled"}`);
       } else if (id === "showModel") {
         const enabled = value === "on";
         setShowModel(enabled);
-        notifyApplied(ctx, `Model display ${enabled ? "enabled" : "disabled"}`);
+        void notifyApplied(ctx, `Model display ${enabled ? "enabled" : "disabled"}`);
       } else if (id === "viewerMarkdown") {
         setViewerMarkdown(value as ViewerMarkdownMode);
-        notifyApplied(ctx, `Viewer markdown set to ${value}`);
+        void notifyApplied(ctx, `Viewer markdown set to ${value}`);
       } else if (id === "fleetView") {
         const enabled = value === "on";
         setFleetViewEnabled(enabled);
-        notifyApplied(ctx, `Fleet view ${enabled ? "enabled" : "disabled"}`);
+        void notifyApplied(ctx, `Fleet view ${enabled ? "enabled" : "disabled"}`);
       } else if (id === "agentMentions") {
         const mode = value as AgentMentionMode;
         setAgentMentionMode(mode);
-        notifyApplied(
+        void notifyApplied(
           ctx,
           mode === "off"
             ? "Agent mentions disabled"
@@ -3840,10 +3818,10 @@ Write the file using the write tool. Only write the file, nothing else.`;
       } else if (id === "rememberAgents") {
         const enabled = value === "on";
         setRememberAgents(enabled);
-        notifyApplied(ctx, `Remember agents ${enabled ? "enabled" : "disabled"}`);
+        void notifyApplied(ctx, `Remember agents ${enabled ? "enabled" : "disabled"}`);
       } else if (id === "widgetMode") {
         setWidgetMode(value as WidgetMode);
-        notifyApplied(ctx, `Widget set to ${value}`);
+        void notifyApplied(ctx, `Widget set to ${value}`);
       }
     }
 
@@ -3943,8 +3921,9 @@ Write the file using the write tool. Only write the file, nothing else.`;
    * value is session-only, and swallowing it here would leave a preference
    * looking persisted when the next session will not have it.
    */
-  function persistSettings(ctx: ExtensionCommandContext | undefined, changeMsg: string): void {
-    const { message, level } = saveAndEmitChanged(
+  async function persistSettings(ctx: ExtensionCommandContext | undefined, changeMsg: string): Promise<void> {
+    const { message, level } = await saveAndEmitChanged(
+      subagentsConfig,
       snapshotSettings(),
       changeMsg,
       (event, payload) => pi.events.emit(event, payload),
@@ -3955,8 +3934,9 @@ Write the file using the write tool. Only write the file, nothing else.`;
     if (level === "warning") ctx?.ui.notify(message, level);
   }
 
-  function notifyApplied(ctx: ExtensionCommandContext, successMsg: string) {
-    const { message, level } = saveAndEmitChanged(
+  async function notifyApplied(ctx: ExtensionCommandContext, successMsg: string): Promise<void> {
+    const { message, level } = await saveAndEmitChanged(
+      subagentsConfig,
       snapshotSettings(),
       successMsg,
       (event, payload) => pi.events.emit(event, payload),

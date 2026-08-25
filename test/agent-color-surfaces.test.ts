@@ -107,7 +107,7 @@ afterEach(() => {
 describe("custom agent color runtime surfaces", () => {
   it("renders the registered Agent tool call header with the display name and color", async () => {
     const { pi, tools, handlers } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     registerColoredReviewer();
 
     try {

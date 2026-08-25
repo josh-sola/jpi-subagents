@@ -14,7 +14,7 @@
  * real extension, so what they pin is the actual delivery path — the notification
  * fires for an unjoined agent, and does not for a consumed one.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -94,10 +94,9 @@ describe("subagents:rpc:consume", () => {
     process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.HOME = agentDir;
     prevCwd = process.cwd();
-    mkdirSync(join(tmpDir, ".pi"), { recursive: true });
     writeFileSync(
-      join(tmpDir, ".pi", "subagents.json"),
-      JSON.stringify({ schedulingEnabled: false, outputTranscript: false }),
+      join(agentDir, "jpi.kdl"),
+      "subagents {\n  scheduling-enabled #false\n  output-transcript #false\n}\n",
     );
     process.chdir(tmpDir);
   });
@@ -119,7 +118,7 @@ describe("subagents:rpc:consume", () => {
   /** Boot the real extension with its RPC handlers bound, as session_start does. */
   async function boot() {
     const booted = makePi();
-    subagentsExtension(booted.pi);
+    await subagentsExtension(booted.pi);
     await booted.lifecycle.get("session_start")({}, ctx());
     shutdown = () => booted.lifecycle.get("session_shutdown")();
     return booted;

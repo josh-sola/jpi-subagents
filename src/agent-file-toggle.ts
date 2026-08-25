@@ -31,15 +31,14 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { parseAgentFrontmatter } from "./custom-agents.js";
 import type { AgentConfig } from "./types.js";
 
-export type AgentFileLocation = "project" | "workspace" | "personal";
+export type AgentFileLocation = "workspace" | "personal";
 
-export const projectAgentsDir = (cwd: string = process.cwd()) => join(cwd, ".pi", "agents");
 export const workspaceAgentsDir = (cwd: string = process.cwd()) => join(cwd, ".agents", "agents");
 export const personalAgentsDir = () => join(getAgentDir(), "agents");
 
 /**
  * Find the file path of a custom agent by name, in discovery-precedence order
- * (project, workspace, then global). Mirrors the load-side precedence in
+ * (workspace, then global). Mirrors the load-side precedence in
  * src/custom-agents.ts — if the two drift, `/agents` edits a file the loader
  * isn't reading.
  */
@@ -47,8 +46,6 @@ export function findAgentFile(
   name: string,
   cwd: string = process.cwd(),
 ): { path: string; location: AgentFileLocation } | undefined {
-  const projectPath = join(projectAgentsDir(cwd), `${name}.md`);
-  if (existsSync(projectPath)) return { path: projectPath, location: "project" };
   const workspacePath = join(workspaceAgentsDir(cwd), `${name}.md`);
   if (existsSync(workspacePath)) return { path: workspacePath, location: "workspace" };
   const personalPath = join(personalAgentsDir(), `${name}.md`);
@@ -88,7 +85,6 @@ export function locateAgentFile(
  * widening the type for a case that has no better answer.
  */
 function classifyAgentDir(path: string, cwd: string): AgentFileLocation {
-  if (path.startsWith(projectAgentsDir(cwd) + sep)) return "project";
   if (path.startsWith(workspaceAgentsDir(cwd) + sep)) return "workspace";
   return "personal";
 }

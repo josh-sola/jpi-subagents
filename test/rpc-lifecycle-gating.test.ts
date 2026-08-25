@@ -15,7 +15,7 @@
  * a mock ExtensionAPI and assert the timing: nothing is wired at factory time;
  * everything is wired (once) on session_start.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -96,8 +96,7 @@ describe("issue #142: RPC handlers + subagents:ready are gated on session_start"
     process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.HOME = agentDir;
     prevCwd = process.cwd();
-    mkdirSync(join(tmpDir, ".pi"), { recursive: true });
-    writeFileSync(join(tmpDir, ".pi", "subagents.json"), JSON.stringify({ schedulingEnabled: false }));
+    writeFileSync(join(agentDir, "jpi.kdl"), "subagents {\n  scheduling-enabled #false\n}\n");
     process.chdir(tmpDir);
   });
 
@@ -112,13 +111,13 @@ describe("issue #142: RPC handlers + subagents:ready are gated on session_start"
     vi.restoreAllMocks();
   });
 
-  it("does NOT advertise or register RPC at factory time (the filtered-out case)", () => {
+  it("does NOT advertise or register RPC at factory time (the filtered-out case)", async () => {
     const { pi, busHandlers } = makePi();
 
     // A filtered-out activation only ever gets the factory run — its
     // session_start never fires. So after the factory alone, nothing should
     // be on the shared bus.
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
 
     expect(readyEmits(pi), "no subagents:ready before session_start").toHaveLength(0);
     for (const channel of RPC_CHANNELS) {
@@ -128,7 +127,7 @@ describe("issue #142: RPC handlers + subagents:ready are gated on session_start"
 
   it("advertises and registers RPC on session_start, and spawn works once bound", async () => {
     const { pi, lifecycle, busHandlers } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
 
     await lifecycle.get("session_start")({}, ctx());
 
@@ -159,7 +158,7 @@ describe("issue #142: RPC handlers + subagents:ready are gated on session_start"
   it("renders an RPC-spawned agent in the native widget while it is running", async () => {
     const { pi, lifecycle, busHandlers } = makePi();
     const activeCtx = ctx(true);
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
 
     await lifecycle.get("session_start")({}, activeCtx);
 
@@ -198,7 +197,7 @@ describe("issue #142: RPC handlers + subagents:ready are gated on session_start"
       options.onSessionCreated?.({ subscribe: () => vi.fn() });
       return new Promise(() => {}) as any;
     });
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
 
     await lifecycle.get("session_start")({}, extensionCtx);
     // TaskExecute runs inside a root tool call, so the extension already has
@@ -224,7 +223,7 @@ describe("issue #142: RPC handlers + subagents:ready are gated on session_start"
 
   it("is idempotent — a second session_start does not re-advertise or double-register", async () => {
     const { pi, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
 
     await lifecycle.get("session_start")({}, ctx());
     await lifecycle.get("session_start")({}, ctx());

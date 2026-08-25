@@ -16,11 +16,12 @@
  * proves the detector can see parallelism at all, so `maxInFlight === 1` is a
  * result rather than a broken probe.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderSubagentsKdl } from "./helpers/boot-extension.js";
 import {
   agentCall,
   agentToolResults,
@@ -46,15 +47,18 @@ describe.skipIf(LIVE)("maxConcurrentForeground e2e (real pi agent loop)", () => 
     for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  function projectDir(settings: Record<string, unknown>): string {
-    const dir = mkdtempSync(join(tmpdir(), "pi-fgconc-e2e-"));
-    tmpDirs.push(dir);
-    mkdirSync(join(dir, ".pi"), { recursive: true });
-    writeFileSync(
-      join(dir, ".pi", "subagents.json"),
-      JSON.stringify({ outputTranscript: false, ...settings }),
-    );
-    return dir;
+  /**
+   * A project cwd plus its own hermetic agent dir — settings live in
+   * `<agentDir>/jpi.kdl`, and runPrintMode's own internal hermetic agent dir
+   * (isolateGlobals: true) isn't addressable before the run starts, so this
+   * test manages the env vars itself (isolateGlobals: false below).
+   */
+  function projectDir(settings: Record<string, unknown>): { cwd: string; agentDir: string } {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-fgconc-e2e-"));
+    const agentDir = mkdtempSync(join(tmpdir(), "pi-fgconc-e2e-agentdir-"));
+    tmpDirs.push(cwd, agentDir);
+    writeFileSync(join(agentDir, "jpi.kdl"), renderSubagentsKdl({ outputTranscript: false, ...settings }));
+    return { cwd, agentDir };
   }
 
   /**
@@ -67,36 +71,50 @@ describe.skipIf(LIVE)("maxConcurrentForeground e2e (real pi agent loop)", () => 
     let maxInFlight = 0;
     const order: string[] = [];
 
-    run = await runPrintMode({
-      prompt: "Delegate two independent jobs and report both.",
-      cwd: projectDir(settings),
-      live: false, // scripted on purpose: a real model may not emit both calls
-      respond: async (context: Context) => {
-        const isParent = (context.tools ?? []).some(t => t.name === "Agent");
-        if (isParent) {
-          const alreadySpawned = context.messages.some(
-            m => m.role === "toolResult" && (m as { toolName?: string }).toolName === "Agent",
-          );
-          if (alreadySpawned) return "Both jobs are done.";
-          // TWO tool calls, ONE assistant message — exactly what the Agent tool
-          // description tells the model to send for parallel work.
-          return [
-            agentCall({ prompt: "JOB-ALPHA", description: "alpha", run_in_background: false }),
-            agentCall({ prompt: "JOB-BETA", description: "beta", run_in_background: false }),
-          ];
-        }
+    const { cwd, agentDir } = projectDir(settings);
+    const prevAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const prevHome = process.env.HOME;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    process.env.HOME = agentDir;
 
-        // A child. Hold the model call so genuine overlap is observable.
-        const label = JSON.stringify(context.messages).includes("JOB-ALPHA") ? "alpha" : "beta";
-        inFlight++;
-        maxInFlight = Math.max(maxInFlight, inFlight);
-        order.push(`start:${label}`);
-        await new Promise(r => setTimeout(r, CHILD_HOLD_MS));
-        order.push(`end:${label}`);
-        inFlight--;
-        return `${label.toUpperCase()}-RESULT`;
-      },
-    });
+    try {
+      run = await runPrintMode({
+        prompt: "Delegate two independent jobs and report both.",
+        cwd,
+        live: false, // scripted on purpose: a real model may not emit both calls
+        isolateGlobals: false,
+        respond: async (context: Context) => {
+          const isParent = (context.tools ?? []).some(t => t.name === "Agent");
+          if (isParent) {
+            const alreadySpawned = context.messages.some(
+              m => m.role === "toolResult" && (m as { toolName?: string }).toolName === "Agent",
+            );
+            if (alreadySpawned) return "Both jobs are done.";
+            // TWO tool calls, ONE assistant message — exactly what the Agent tool
+            // description tells the model to send for parallel work.
+            return [
+              agentCall({ prompt: "JOB-ALPHA", description: "alpha", run_in_background: false }),
+              agentCall({ prompt: "JOB-BETA", description: "beta", run_in_background: false }),
+            ];
+          }
+
+          // A child. Hold the model call so genuine overlap is observable.
+          const label = JSON.stringify(context.messages).includes("JOB-ALPHA") ? "alpha" : "beta";
+          inFlight++;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          order.push(`start:${label}`);
+          await new Promise(r => setTimeout(r, CHILD_HOLD_MS));
+          order.push(`end:${label}`);
+          inFlight--;
+          return `${label.toUpperCase()}-RESULT`;
+        },
+      });
+    } finally {
+      if (prevAgentDir == null) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = prevAgentDir;
+      if (prevHome == null) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+    }
 
     return { maxInFlight, order };
   }

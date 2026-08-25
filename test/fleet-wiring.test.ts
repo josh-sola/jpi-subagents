@@ -9,7 +9,7 @@
  * and that `session_shutdown` tears it down. runAgent is mocked (no LLM); the
  * manager, settings load, completion routing, and lifecycle handlers are real.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -85,10 +85,12 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.HOME = agentDir;
     prevCwd = process.cwd();
-    mkdirSync(join(tmpDir, ".pi"), { recursive: true });
     // async join → completion routes straight to sendIndividualNudge (no batch
     // debounce), so fleet.onAgentFinished fires synchronously on the result.
-    writeFileSync(join(tmpDir, ".pi", "subagents.json"), JSON.stringify({ schedulingEnabled: false, defaultJoinMode: "async" }));
+    writeFileSync(
+      join(agentDir, "jpi.kdl"),
+      'subagents {\n  scheduling-enabled #false\n  default-join-mode "async"\n}\n',
+    );
     process.chdir(tmpDir);
   });
 
@@ -105,7 +107,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
 
   it("captures terminal input on tool_execution_start (fleet hooked into the UI)", async () => {
     const { pi, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     const ui = uiCtx();
     await lifecycle.get("tool_execution_start")?.({}, ctxWith(ui));
     expect(ui.onTerminalInput).toHaveBeenCalled();
@@ -120,7 +122,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     });
 
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
 
     const ui = uiCtx();
     await lifecycle.get("tool_execution_start")?.({}, ctxWith(ui)); // fleet captures THIS ui

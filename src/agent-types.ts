@@ -1,7 +1,7 @@
 /**
  * agent-types.ts — Unified agent type registry.
  *
- * Merges embedded default agents with user-defined agents from .pi/agents/*.md, .agents/agents/*.md, and global agents.
+ * Merges embedded default agents with user-defined agents from .agents/agents/*.md and global agents.
  * User agents override defaults with the same name. Disabled agents are kept but excluded from spawning.
  */
 
@@ -39,8 +39,8 @@ export const NO_FALLBACK = "none";
 /**
  * Agent type substituted when a caller-supplied `subagent_type` doesn't resolve
  * to exactly one enabled agent. `undefined` keeps the historical behavior
- * (general-purpose); `NO_FALLBACK` makes dispatch fail closed. Set from
- * `subagents.json` (`fallbackSubagent`).
+ * (general-purpose); `NO_FALLBACK` makes dispatch fail closed. Set from the
+ * `subagents { }` jpi.kdl section (`fallback-subagent`).
  *
  * Module state rather than an index.ts closure because every caller-supplied
  * spawn path needs it — the Agent tool, the scheduler, and cross-extension RPC.

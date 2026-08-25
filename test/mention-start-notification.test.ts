@@ -47,10 +47,10 @@ function fakeSession() {
   } as any;
 }
 
-function boot(settings: Record<string, unknown> = {}) {
+async function boot(settings: Record<string, unknown> = {}) {
   hermetic = hermeticDir({ settings: { outputTranscript: false, ...settings } });
   const b = makePi();
-  subagentsExtension(b.pi);
+  await subagentsExtension(b.pi);
   booted = b.lifecycle;
   return b;
 }
@@ -60,7 +60,7 @@ const send = (lifecycle: Map<string, any>, text: string) =>
 
 describe("an agent started by a mention", () => {
   it("relays its answer through the ordinary completion notification (direct mode)", async () => {
-    const { pi, lifecycle } = boot({ agentMentions: "direct" });
+    const { pi, lifecycle } = await boot({ agentMentions: "direct" });
     vi.mocked(runAgent).mockResolvedValue({
       responseText: "found four planted bugs",
       session: fakeSession(),
@@ -84,7 +84,7 @@ describe("an agent started by a mention", () => {
   it("relays it when the clone fell back to a direct start (model mode)", async () => {
     // What the user hits today: the clone reports it could not start the agent,
     // index.ts starts it directly, and the answer still has to come back.
-    const { pi, lifecycle } = boot();
+    const { pi, lifecycle } = await boot();
     vi.mocked(runMentionClone).mockResolvedValue({ spawned: false, error: "the conversation clone did not start it" });
     vi.mocked(runAgent).mockResolvedValue({
       responseText: "cyan, obviously",

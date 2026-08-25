@@ -77,7 +77,7 @@ const steer = (tools: Map<string, any>, agent_id: string, message: string) =>
 describe("steer_subagent before the session exists", () => {
   it("queues the message on the record and says so", async () => {
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     heldRun();
 
     const id = await spawnBackground(tools);
@@ -93,7 +93,7 @@ describe("steer_subagent before the session exists", () => {
   it("appends a second queued steer instead of replacing the first", async () => {
     // Overwriting would lose the earlier correction while still reporting success.
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     const run = heldRun();
 
     const id = await spawnBackground(tools);
@@ -115,7 +115,7 @@ describe("steer_subagent before the session exists", () => {
 
   it("does not call steerAgent — there is no session to steer yet", async () => {
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     heldRun();
 
     const id = await spawnBackground(tools);
@@ -133,7 +133,7 @@ describe("steer_subagent once the session exists", () => {
     // The event is emitted only AFTER steerAgent resolves, so a failed steer
     // must not announce itself as delivered.
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     const run = heldRun();
 
     const id = await spawnBackground(tools);
@@ -156,7 +156,7 @@ describe("steer_subagent once the session exists", () => {
 
   it("delivers through steerAgent and announces the steer on success", async () => {
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     const run = heldRun();
 
     const id = await spawnBackground(tools);

@@ -43,7 +43,7 @@ async function scheduleAndReadBack(
 ): Promise<{ job: ScheduledSubagent; reply: string; restore: () => void }> {
   const hermetic = hermeticDir();
   const { pi, tools, lifecycle } = makePi();
-  subagentsExtension(pi);
+  await subagentsExtension(pi);
 
   const c = bootedCtx();
   await lifecycle.get("session_start")?.({}, c);
@@ -58,7 +58,7 @@ async function scheduleAndReadBack(
     ),
   );
 
-  const store = new ScheduleStore(resolveStorePath(c.cwd, SESSION_ID));
+  const store = new ScheduleStore(resolveStorePath(SESSION_ID));
   const jobs = store.list();
   await lifecycle.get("session_shutdown")?.();
   expect(jobs, `expected one persisted job, reply was: ${reply}`).toHaveLength(1);
@@ -137,7 +137,7 @@ describe("Agent tool → schedule restrictions", () => {
   ): Promise<{ reply: string; jobCount: number; restore: () => void }> {
     const hermetic = hermeticDir(settings ? { settings } : {});
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
 
     const c = bootedCtx();
     await lifecycle.get("session_start")?.({}, c);
@@ -160,7 +160,7 @@ describe("Agent tool → schedule restrictions", () => {
 
     let jobCount = 0;
     try {
-      jobCount = new ScheduleStore(resolveStorePath(c.cwd, SESSION_ID)).list().length;
+      jobCount = new ScheduleStore(resolveStorePath(SESSION_ID)).list().length;
     } catch { /* store never created — nothing was scheduled */ }
     await lifecycle.get("session_shutdown")?.();
     return { reply, jobCount, restore: hermetic.restore };

@@ -21,7 +21,7 @@
  * and "not found" was the correct answer. Test 3 pins the eviction rule that
  * DOES apply, so the two are not confused again.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -121,8 +121,7 @@ describe("issue #174: foreground agent that hits max_turns", () => {
     process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.HOME = agentDir;
     prevCwd = process.cwd();
-    mkdirSync(join(tmpDir, ".pi"), { recursive: true });
-    writeFileSync(join(tmpDir, ".pi", "subagents.json"), JSON.stringify({ schedulingEnabled: false }));
+    writeFileSync(join(agentDir, "jpi.kdl"), "subagents {\n  scheduling-enabled #false\n}\n");
     process.chdir(tmpDir);
   });
 
@@ -139,7 +138,7 @@ describe("issue #174: foreground agent that hits max_turns", () => {
 
   it("is NOT cleaned up — get_subagent_result with the real id still resolves it", async () => {
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     const { res, id } = await runForegroundSteeredAgent(tools);
 
     // The inline result is the turn-limit wrap-up the reporter described.
@@ -156,7 +155,7 @@ describe("issue #174: foreground agent that hits max_turns", () => {
 
   it("never hands the model an agent id — the id lives only in renderer details", async () => {
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     const { res, id } = await runForegroundSteeredAgent(tools);
 
     // `content` is the only thing serialized to the API. If the id isn't here,
@@ -186,13 +185,13 @@ describe("issue #174: foreground agent that hits max_turns", () => {
     // can, and if its session_start / session_shutdown reached the PARENT's
     // manager, that activation ending would wipe the parent's records.
     const parent = makePi();
-    subagentsExtension(parent.pi);
+    await subagentsExtension(parent.pi);
     await parent.lifecycle.get("session_start")?.({}, ctx());
     const { id } = await runForegroundSteeredAgent(parent.tools);
 
     // A child activation runs its full lifecycle, as a subagent session does.
     const child = makePi();
-    subagentsExtension(child.pi);
+    await subagentsExtension(child.pi);
     await child.lifecycle.get("session_start")?.({}, ctx());
     await child.lifecycle.get("session_shutdown")?.({}, ctx());
 
@@ -207,7 +206,7 @@ describe("issue #174: foreground agent that hits max_turns", () => {
 
   it("IS evicted by a session switch — its result was already delivered inline", async () => {
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
+    await subagentsExtension(pi);
     const { id } = await runForegroundSteeredAgent(tools);
 
     // Foreground results count as consumed the moment they're returned inline,

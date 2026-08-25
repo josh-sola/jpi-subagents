@@ -1,11 +1,11 @@
 ---
 description: "memory + disallowed_tools — a denied write tool must not count as write capability."
-memory: project
+memory: user
 tools: read, write
 disallowed_tools: write
 expect_tools_present: "read"
 expect_tools_absent: "write, edit, bash, grep"
-expect_prompt_contains: "Agent Memory (read-only), Memory scope: project"
+expect_prompt_contains: "Agent Memory (read-only), Memory scope: user"
 expect_prompt_absent: "persistent memory directory"
 ---
 README: "The `disallowed_tools` field is respected when determining write
@@ -20,6 +20,7 @@ widening the set the agent asked for. The denylist still filters the registry, s
 the visible symptom is an agent instructed to write memory files with no tool to
 do it; the invisible one is the tool-name widening.
 
-Scope `project` is safe here precisely because the read-only branch creates no
-memory directory — if this fixture ever flips to the read-write branch, it would
-also start writing into the repo, which is the loudest possible signal.
+Safe here precisely because the read-only branch creates no memory directory —
+if this fixture ever flips to the read-write branch, it would start writing
+into the test's hermetic `PI_CODING_AGENT_DIR`, which is the loudest possible
+signal.
