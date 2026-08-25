@@ -50,7 +50,6 @@ import {
   formatTokens,
   formatTurns,
   getDisplayName,
-  getPromptModeLabel,
   SPINNER,
   type Theme,
   type UICtx,
@@ -1751,16 +1750,13 @@ Terse command-style prompts produce shallow, generic work.
         runInBackground,
         isolation,
       };
-      // Tool-result render shows the mode label too; viewer's header already does.
-      const modeLabel = getPromptModeLabel(subagentType);
       const { tags: invocationTags } = buildInvocationTags(agentInvocation);
-      const agentTags = modeLabel ? [modeLabel, ...invocationTags] : invocationTags;
       const detailBase = {
         displayName,
         description: params.description,
         subagentType,
         modelName,
-        tags: agentTags.length > 0 ? agentTags : undefined,
+        tags: invocationTags.length > 0 ? invocationTags : undefined,
       };
 
       /**
@@ -1771,23 +1767,17 @@ Terse command-style prompts produce shallow, generic work.
        * further and ignores the model/thinking parameters outright — it runs on
        * the session it is reopening — so rendering the base there advertises
        * settings the run never used.
-       *
-       * The mode label is rebuilt rather than carried over: it hangs off the
-       * agent TYPE, not the invocation, so tags taken straight from
-       * buildInvocationTags would silently drop `twin`.
        */
       const detailBaseFor = (rec: AgentRecord | undefined): typeof detailBase => {
         if (!rec?.invocation) return detailBase;
         const type = rec.type;
         const { modelName: recModelName, tags } = buildInvocationTags(rec.invocation);
-        const recModeLabel = getPromptModeLabel(type);
-        const recTags = recModeLabel ? [recModeLabel, ...tags] : tags;
         return {
           displayName: getDisplayName(type),
           description: rec.description,
           subagentType: type,
           modelName: recModelName,
-          tags: recTags.length > 0 ? recTags : undefined,
+          tags: tags.length > 0 ? tags : undefined,
         };
       };
 

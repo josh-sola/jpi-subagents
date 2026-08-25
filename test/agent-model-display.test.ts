@@ -171,9 +171,7 @@ describe("Agent tool result — effective model", () => {
       .render(200).join("\n")).toContain("opus 4.6");
   });
 
-  it("keeps the twin label beside the model", async () => {
-    // The mode label hangs off the agent type, not the invocation, so anything
-    // that rebuilds tags from the invocation alone silently drops it.
+  it("does not expose prompt mode in result details or rendered output", async () => {
     vi.mocked(runAgent).mockImplementation(async (_c: any, _t: any, _p: any, options: any) => {
       const s = session("anthropic", "claude-opus-4-6", "high");
       options.onSessionCreated?.(s);
@@ -189,8 +187,10 @@ describe("Agent tool result — effective model", () => {
       ctx(),
     );
 
-    expect(result.details.tags).toContain("twin");
-    expect(render(tool, result)).toContain("twin");
+    expect(result.details.tags ?? []).not.toContain("twin");
+    expect(JSON.stringify(result.details)).not.toContain("twin");
+    expect(render(tool, result)).not.toContain("twin");
+    expect(render(tool, result, true)).not.toContain("twin");
   });
 
   it("reports the session's level, and what was asked for, when pi clamps it", async () => {
