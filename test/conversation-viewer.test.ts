@@ -120,10 +120,10 @@ describe("ConversationViewer invocation line", () => {
       { fg: (_c: string, t: string) => t, bold: (t: string) => t } as any,
       vi.fn(),
     );
-    // The row arrives inside the overlay's frame, padded out to the right
-    // border; what is under test is the metadata it carries.
+    // The row arrives padded out to the full render width with trailing
+    // spaces; what is under test is the metadata it carries.
     const row = viewer.render(200).find(l => l.includes("↳"));
-    return row ? row.slice(row.indexOf("↳")).replace(/\s*│\s*$/, "") : "";
+    return row ? row.slice(row.indexOf("↳")).trimEnd() : "";
   }
 
   // The canonical id, not the short label the widget uses: this overlay is
@@ -228,7 +228,7 @@ describe("ConversationViewer", () => {
       }
     });
 
-    it("keeps bordered rows exact-width at a double-width truncation boundary", () => {
+    it("keeps rows exact-width at a double-width truncation boundary", () => {
       const width = 40;
       for (let prefixLength = 0; prefixLength < width; prefixLength++) {
         const viewer = new ConversationViewer(
@@ -243,7 +243,7 @@ describe("ConversationViewer", () => {
         for (const line of viewer.render(width)) {
           expect(
             visibleWidth(line),
-            `prefix ${prefixLength} produced an under-width bordered row: ${JSON.stringify(line)}`,
+            `prefix ${prefixLength} produced an under-width row: ${JSON.stringify(line)}`,
           ).toBe(width);
         }
       }
@@ -622,8 +622,8 @@ describe("ConversationViewer", () => {
     });
 
     it("keeps tool results dim on the literal path", () => {
-      // Reads the content line directly: every bordered row carries the theme's
-      // escape on its `│`, so asserting on rendered output would pass either way.
+      // Reads the content line directly, without the header/footer chrome
+      // render() would add around it.
       const viewer = viewerFor(result("plain result text"), "off");
       const line = (viewer as any).buildContentLines(76)
         .find((l: string) => strip(l).includes("plain result text"));

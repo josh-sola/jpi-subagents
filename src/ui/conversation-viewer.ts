@@ -287,22 +287,17 @@ export class ConversationViewer implements Component {
   render(width: number): string[] {
     if (width < 6) return []; // too narrow for any meaningful rendering
     const th = this.theme;
-    const innerW = width - 4; // border + padding
+    const innerW = width;
     this.lastInnerW = innerW;
     const lines: string[] = [];
 
-    const pad = (s: string, len: number) => {
-      const vis = visibleWidth(s);
-      return s + " ".repeat(Math.max(0, len - vis));
-    };
-    const row = (content: string) =>
-      th.fg("border", "│") + " " + truncateToWidth(pad(content, innerW), innerW, "...", true) + " " + th.fg("border", "│");
-    const hrTop = th.fg("border", `╭${"─".repeat(width - 2)}╮`);
-    const hrBot = th.fg("border", `╰${"─".repeat(width - 2)}╯`);
-    const hrMid = row(th.fg("dim", "─".repeat(innerW)));
+    // No left margin: mouse-selection copy only trims trailing whitespace, so a
+    // leading space here would land in every line a viewer copies.
+    const line = (content: string) => truncateToWidth(content, innerW, "...", true);
+    const hr = th.fg("border", "─".repeat(innerW));
 
     // Header
-    lines.push(hrTop);
+    lines.push(hr);
     const modeLabel = getPromptModeLabel(this.record.type);
     const modeTag = modeLabel ? ` ${th.fg("dim", `(${modeLabel})`)}` : "";
     const statusIcon = this.record.status === "running"
@@ -328,12 +323,12 @@ export class ConversationViewer implements Component {
     const cost = this.showCost ? formatCost(getLifetimeCost(this.record.lifetimeUsage)) : "";
     if (cost) headerParts.push(cost);
 
-    lines.push(row(
+    lines.push(line(
       `${statusIcon} ${renderAgentName(this.record.type, th, { bold: true })}${modeTag}  ${th.fg("muted", this.record.description)} ${th.fg("dim", "·")} ${fgPreservingNestedStyles(th, "dim", headerParts.join(" · "))}`,
     ));
     const invocationLine = this.invocationLine();
-    if (invocationLine) lines.push(row(invocationLine));
-    lines.push(hrMid);
+    if (invocationLine) lines.push(line(invocationLine));
+    lines.push(hr);
 
     // Content area — rebuild every render (live data, no cache needed)
     const contentLines = this.buildContentLines(innerW);
@@ -348,18 +343,18 @@ export class ConversationViewer implements Component {
     const visible = contentLines.slice(visibleStart, visibleStart + viewportHeight);
 
     for (let i = 0; i < viewportHeight; i++) {
-      lines.push(row(visible[i] ?? ""));
+      lines.push(line(visible[i] ?? ""));
     }
 
     // Footer
-    lines.push(hrMid);
+    lines.push(hr);
     if (this.composer) {
       // Composer row: the Input renders its own `> ` prompt and cursor.
-      lines.push(row(this.composer.render(innerW)[0] ?? ""));
+      lines.push(line(this.composer.render(innerW)[0] ?? ""));
       const composeHint = th.fg("dim", "Enter send · Esc cancel");
       const composeLeft = th.fg("accent", "✎ steer");
       const composeGap = Math.max(1, innerW - visibleWidth(composeLeft) - visibleWidth(composeHint));
-      lines.push(row(composeLeft + " ".repeat(composeGap) + composeHint));
+      lines.push(line(composeLeft + " ".repeat(composeGap) + composeHint));
     } else {
       // Actions on the left, navigation on the right. The scroll hint keeps its
       // full key list so the less-obvious bindings stay discoverable; it leads
@@ -388,9 +383,9 @@ export class ConversationViewer implements Component {
         : actions.join(sep);
 
       const footerGap = Math.max(1, innerW - visibleWidth(footerLeft) - visibleWidth(footerRight));
-      lines.push(row(footerLeft + " ".repeat(footerGap) + footerRight));
+      lines.push(line(footerLeft + " ".repeat(footerGap) + footerRight));
     }
-    lines.push(hrBot);
+    lines.push(hr);
 
     return lines;
   }
