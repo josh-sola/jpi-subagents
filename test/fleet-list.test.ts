@@ -372,6 +372,56 @@ describe("FleetList navigation", () => {
   });
 });
 
+describe("FleetList consumer attachment", () => {
+  it("tears the widget down on attach and calls the consumer from update() instead", () => {
+    const h = harness([makeRecord({ description: "one" })]);
+    expect(h.render().length).toBeGreaterThan(0); // widget registered before attach
+
+    const consumer = { requestRender: vi.fn() };
+    h.fleet.attachConsumer(consumer);
+    expect(h.render()).toEqual([]); // widget unregistered immediately on attach
+
+    h.fleet.update();
+    expect(consumer.requestRender).toHaveBeenCalled();
+  });
+
+  it("renderForConsumer matches the widget path's own output", () => {
+    const h = harness([makeRecord({ description: "one" })]);
+    const widgetLines = h.render(80);
+    expect(h.fleet.renderForConsumer(80, theme)).toEqual(widgetLines);
+  });
+
+  it("renderForConsumer returns [] when the fleet view is disabled", () => {
+    const h = harness([makeRecord()]);
+    h.fleet.setEnabled(false);
+    expect(h.fleet.renderForConsumer(80, theme)).toEqual([]);
+  });
+
+  it("detach restores the widget fallback", () => {
+    const h = harness([makeRecord({ description: "one" })]);
+    const consumer = { requestRender: vi.fn() };
+    const detach = h.fleet.attachConsumer(consumer);
+    expect(h.render()).toEqual([]);
+
+    detach();
+    h.fleet.update();
+    expect(h.render().some(l => l.includes("one"))).toBe(true);
+  });
+
+  it("last attach wins — detaching a superseded consumer leaves the current one attached", () => {
+    const h = harness([makeRecord({ description: "one" })]);
+    const first = { requestRender: vi.fn() };
+    const detachFirst = h.fleet.attachConsumer(first);
+    const second = { requestRender: vi.fn() };
+    h.fleet.attachConsumer(second);
+
+    detachFirst(); // stale — must not clear `second`
+    h.fleet.update();
+    expect(second.requestRender).toHaveBeenCalled();
+    expect(h.render()).toEqual([]); // still no widget — a consumer is still current
+  });
+});
+
 describe("FleetList vs other focused components (#123)", () => {
   // pi dispatches terminal input to extension listeners BEFORE the focused
   // component (pi-tui TUI.handleInput), and ctx.ui.select/confirm/input swap

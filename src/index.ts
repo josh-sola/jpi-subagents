@@ -24,6 +24,7 @@ import { BUILTIN_TOOL_NAMES, getAgentConfig, getAllTypes, getAvailableTypes, get
 import { inChildSessionContext } from "./child-context.js";
 import { type RpcHandle, registerRpcHandlers } from "./cross-extension-rpc.js";
 import { loadCustomAgents } from "./custom-agents.js";
+import { wireFleetFooterProvider } from "./fleet-footer-bridge.js";
 import { GroupJoinManager } from "./group-join.js";
 import { isolationParam, resolveAgentInvocationConfig, resolveJoinMode } from "./invocation-config.js";
 import { describeMention, handleBase, isReservedHandle, parseMention, resolveHandleToType, stripAgentPrefix } from "./mention.js";
@@ -718,6 +719,8 @@ export default async function (pi: ExtensionAPI) {
   let rpcHandle: RpcHandle | undefined;
   /** Whether the `@handle` autocomplete wrapper has been stacked on pi's provider. */
   let mentionProviderRegistered = false;
+  /** Whether the fleet-footer provider handshake (`fleet-footer-bridge.js`) has been wired. */
+  let fleetBridgeWired = false;
 
   // Capture ctx from session_start for the RPC spawn handler. This also wires
   // the RPC handlers and broadcasts readiness — on the first bound
@@ -727,6 +730,12 @@ export default async function (pi: ExtensionAPI) {
     if (ctx.hasUI) {
       widget.setUICtx(ctx.ui);
       fleet.setUICtx(ctx.ui as any);
+      // Wired once per activation, like rpcHandle below: jpi-status (if present)
+      // picks the rows up from here instead of the belowEditor widget.
+      if (!fleetBridgeWired) {
+        fleetBridgeWired = true;
+        wireFleetFooterProvider(pi.events, fleet);
+      }
     }
     manager.clearCompleted(true);
     // session_start fires once per activation, but a double-bind must not

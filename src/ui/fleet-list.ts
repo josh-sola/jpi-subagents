@@ -1,5 +1,6 @@
 /**
- * fleet-list.ts — Claude Code-style "FleetView" list rendered below the editor.
+ * fleet-list.ts — Claude Code-style "FleetView" list, normally rendered below
+ * the editor.
  *
  * Shows `main` + each running/queued subagent, with nested children indented
  * under their parent, as a navigable list. Pressing ↓ (or ←) at an empty
@@ -7,9 +8,14 @@
  * Enter opens the selected agent's live conversation overlay, Esc returns to the prompt.
  * A viewer stays open when its agent finishes; finished agents linger briefly in the list.
  *
- * Mechanics (see plan): the list is a `belowEditor` widget (render-only), and ALL key
- * handling goes through `onTerminalInput` — which fires before the focused editor and
- * can `consume` keys — gated on `getEditorText() === ""` so normal typing is untouched.
+ * Mechanics (see plan): by default the list is a `belowEditor` widget (render-only).
+ * When a consumer attaches (see `attachConsumer` — `fleet-footer-bridge.ts` hands one
+ * to jpi-status so it can draw the rows below its own status footer instead), the
+ * widget is torn down and every place that would otherwise register or refresh it
+ * asks the consumer to re-render instead. ALL key handling goes through
+ * `onTerminalInput` — which fires before the focused editor and can `consume` keys —
+ * gated on `getEditorText() === ""` so normal typing is untouched; that is unaffected
+ * by whether a consumer is attached.
  */
 
 import { Editor, isKeyRelease, Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
@@ -28,6 +34,11 @@ const MAX_AGENT_ROWS = 5;
 const TICK_MS = 200;
 /** How long a finished agent lingers in the list before it drops out. */
 const FINISHED_LINGER_MS = 4000;
+
+/** Minimal surface a fleet render consumer (e.g. jpi-status's footer) needs. */
+export interface FleetConsumer {
+  requestRender(): void;
+}
 
 /** Minimal UI surface the FleetView needs from `ctx.ui` (structural subset). */
 export type FleetUICtx = {
@@ -123,6 +134,8 @@ export class FleetList {
   private inputUnsub: (() => void) | undefined;
   private widgetRegistered = false;
   private timer: ReturnType<typeof setInterval> | undefined;
+  /** Set once a consumer attaches; `update()` refreshes it instead of the widget. */
+  private consumer: FleetConsumer | undefined;
 
   private enabled = true;
   /** Whether arrow keys currently navigate the list (vs. flow to the editor). */
@@ -181,6 +194,27 @@ export class FleetList {
   }
 
   /**
+   * Hand rendering to an external consumer (jpi-status's footer) instead of the
+   * `belowEditor` widget. Tears the widget down immediately, and `update()` calls
+   * `consumer.requestRender()` from then on. Last attach wins; the returned
+   * detach only clears the consumer if it is still the current one, and the next
+   * `update()` restores the widget fallback.
+   */
+  attachConsumer(consumer: FleetConsumer): () => void {
+    this.consumer = consumer;
+    if (this.ui && this.widgetRegistered) {
+      this.ui.setWidget(FLEET_KEY, undefined);
+      this.widgetRegistered = false;
+      this.tui = undefined;
+    }
+    return () => {
+      if (this.consumer !== consumer) return;
+      this.consumer = undefined;
+      this.update();
+    };
+  }
+
+  /**
    * Called when an agent finishes. The viewer (if open on it) stays open so the
    * final output remains readable, and the row lingers in the list — just refresh.
    */
@@ -198,11 +232,16 @@ export class FleetList {
     this.widgetRegistered = false;
     this.tui = undefined;
     this.active = false;
+    this.consumer = undefined;
     // Null last so a `viewerClose()` microtask above can't re-register the widget.
     this.ui = undefined;
   }
 
-  /** Re-register/refresh the below-editor widget; clears it when nothing remains. */
+  /**
+   * Re-render for whichever surface owns the fleet rows right now: an attached
+   * consumer, or (the default) the below-editor widget — registered/refreshed,
+   * or cleared when nothing remains.
+   */
   update(): void {
     if (!this.ui) return;
     // A run with no agents of its own left in the list is still worth a row —
@@ -220,11 +259,17 @@ export class FleetList {
       if (this.timer) { clearInterval(this.timer); this.timer = undefined; }
       this.active = false;
       this.selectedIndex = 0;
+      this.consumer?.requestRender();
       return;
     }
 
     this.clampSelection();
     this.ensureTimer(); // keep stats ticking whenever the list is shown (e.g. after a re-enable)
+
+    if (this.consumer) {
+      this.consumer.requestRender();
+      return;
+    }
 
     if (!this.widgetRegistered) {
       this.ui.setWidget(FLEET_KEY, (tui, theme) => {
@@ -238,6 +283,16 @@ export class FleetList {
     } else {
       this.tui?.requestRender();
     }
+  }
+
+  /**
+   * Render the fleet rows for an external consumer — the same output
+   * `renderBar` gives the `belowEditor` widget, including the activation hint
+   * and selection markers. Empty when the fleet view is off or has no rows.
+   */
+  renderForConsumer(width: number, theme: Theme): string[] {
+    if (!this.enabled) return [];
+    return this.renderBar(width, theme);
   }
 
   // ---- Roster ----
