@@ -36,7 +36,7 @@ export interface SpawnCapable {
   abort(id: string): boolean;
   /**
    * The record behind an id, for the stop handler's ownership check. Narrowed
-   * to the two fields `isTopLevelAgent` reads, so the RPC layer keeps its
+   * to the one field `isTopLevelAgent` reads, so the RPC layer keeps its
    * deliberately shallow view of the manager.
    */
   getRecord(id: string): Pick<AgentRecord, "parentAgentId"> | undefined;
