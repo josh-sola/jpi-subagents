@@ -319,47 +319,6 @@ describe("AgentManager — nested runtime propagation", () => {
     expect(manager.getRecord(siblingId)?.status).toBe("queued");
   });
 
-  it("starts a workflow's children regardless of the concurrency pool", async () => {
-    // A workflow bounds its own fan-out. Routing its agents through the session
-    // pool as well would let one run fill it and starve everything else — and
-    // the run itself is not in the pool to be drained behind them.
-    vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
-    manager = new AgentManager(undefined, 1);
-
-    const holder = manager.spawn(mockPi, mockCtx, "general-purpose", "holder", {
-      description: "holder",
-      isBackground: true,
-    });
-    const childId = manager.spawn(mockPi, mockCtx, "scout", "child", {
-      description: "child",
-      isBackground: true,
-      workflowId: "wf_run1",
-    });
-    // A second top-level background agent still queues — the pool is untouched.
-    const siblingId = manager.spawn(mockPi, mockCtx, "general-purpose", "sibling", {
-      description: "sibling",
-      isBackground: true,
-    });
-
-    expect(manager.getRecord(holder)?.status).toBe("running");
-    expect(manager.getRecord(childId)?.status).toBe("running");
-    expect(manager.getRecord(siblingId)?.status).toBe("queued");
-  });
-
-  it("gives a workflow's child no handle, so nothing can address it", () => {
-    // Same reasoning as a nested child: it is filtered out of every top-level
-    // surface, so a handle would name something unreachable and consume a name
-    // a visible agent could have taken.
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "child", {
-      description: "child",
-      workflowId: "wf_run1",
-    });
-    expect(manager.getRecord(id)?.handle).toBeUndefined();
-
-    const visible = manager.spawn(mockPi, mockCtx, "general-purpose", "mine", { description: "mine" });
-    expect(manager.getRecord(visible)?.handle).toBe("general-purpose");
-  });
-
   it("aborts owned children when the parent settles", async () => {
     let finishParent: ((value: any) => void) | undefined;
     // Children settle on abort, as a real run does when its signal fires.
@@ -882,35 +841,6 @@ describe("AgentManager — isolation: worktree fails loud, no silent fallback", 
     expect(manager.getRecord(queuedId)!.status).toBe("completed");
   });
 
-  it("keeps a structured payload parseable when the worktree note is appended", async () => {
-    // `record.result` is prose for a reader and picks up a branch note on the
-    // way out. A schema'd payload living in the same field would stop parsing
-    // for every `agent({ schema, isolation: "worktree" })` call.
-    const { createWorktree, cleanupWorktree } = await import("../src/worktree.js");
-    const wt = { path: "/wt/a", branch: "pi-agent-a", baseSha: "abc", workPath: "/wt/a" };
-    vi.mocked(createWorktree).mockResolvedValueOnce(wt as never);
-    vi.mocked(cleanupWorktree).mockReturnValueOnce({ hasChanges: true, branch: "pi-agent-a" } as never);
-    vi.mocked(runAgent).mockResolvedValue({
-      responseText: "I edited two files",
-      session: mockSession(),
-      aborted: false,
-      steered: false,
-      structuredJson: '{"answer":"42"}',
-    } as never);
-
-    manager = new AgentManager();
-    const id = manager.spawn(mockPi, mockCtx, "X", "go", {
-      description: "go", isBackground: true, isolation: "worktree",
-    });
-    await manager.awaitStartup(id);
-    await vi.waitFor(() => expect(manager.getRecord(id)!.status).toBe("completed"));
-
-    const record = manager.getRecord(id)!;
-    expect(JSON.parse(record.structuredJson!)).toEqual({ answer: "42" });
-    // The note still reaches the prose, which is where a human reads it.
-    expect(record.result).toContain("Changes saved to branch");
-  });
-
   it("a stop that lands during the copy discards the worktree instead of running", async () => {
     // Window that did not exist when creation was synchronous: abort() can mark
     // the record stopped while the repo is still being copied.
@@ -941,8 +871,7 @@ describe("AgentManager — isolation: worktree fails loud, no silent fallback", 
 
 // The worktree is committed to a branch and deleted inside the settle path, so
 // a caller holding the finished record can no longer see what the child wrote.
-// `onBeforeWorktreeCleanup` is the one window where it still exists — a workflow
-// `gate` runs there, and a gate pointed at the wrong tree is worse than none.
+// `onBeforeWorktreeCleanup` is the one window where it still exists.
 describe("AgentManager — onBeforeWorktreeCleanup", () => {
   let manager: AgentManager;
   const wt = { path: "/wt/copy", branch: "pi-agent-x", baseSha: "abc", workPath: "/wt/copy" };
@@ -1225,23 +1154,6 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
     await manager.getRecord(id)!.promise;
 
     expect(vi.mocked(runAgent).mock.lastCall![3].worktreeBase).toBeUndefined();
-  });
-
-  it("passes `workflow` to the runner exactly when the spawn carries a workflowId", async () => {
-    vi.mocked(runAgent).mockClear();
-    resolvedRun();
-
-    manager = new AgentManager();
-    const owned = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
-      description: "test",
-      workflowId: "wf_abc123",
-    });
-    await manager.getRecord(owned)!.promise;
-    expect(vi.mocked(runAgent).mock.lastCall![3].workflow).toBe(true);
-
-    const plain = manager.spawn(mockPi, mockCtx, "general-purpose", "test", { description: "test" });
-    await manager.getRecord(plain)!.promise;
-    expect(vi.mocked(runAgent).mock.lastCall![3].workflow).toBe(false);
   });
 
   it("relative cwd throws immediately; no orphan record", () => {

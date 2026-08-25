@@ -39,7 +39,7 @@ export interface SpawnCapable {
    * to the two fields `isTopLevelAgent` reads, so the RPC layer keeps its
    * deliberately shallow view of the manager.
    */
-  getRecord(id: string): Pick<AgentRecord, "parentAgentId" | "workflowId"> | undefined;
+  getRecord(id: string): Pick<AgentRecord, "parentAgentId"> | undefined;
   /**
    * Mark a settled agent's result as read by the caller, suppressing the
    * completion notification — what `get_subagent_result` does when it returns
@@ -164,14 +164,14 @@ export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
     events, "subagents:rpc:stop", ({ agentId }) => {
       const record = manager.getRecord(agentId);
       if (!record) throw new Error("Agent not found");
-      // Only the session's own agents are this RPC's to stop. A nested child or
-      // a workflow's agent is owned by something that is *waiting on it*, and
-      // aborting it out from under that owner turns another extension's stop
-      // into a failed step here. Defence in depth rather than a live hole: no
-      // RPC hands out agent ids, so a caller has no ordinary way to name one it
-      // does not own — but the guard is cheap and the id may leak some other
-      // way. Same refuse-what-we-should-not-touch stance as `consume` below.
-      if (!isTopLevelAgent(record)) throw new Error("Agent is owned by another agent or workflow");
+      // Only the session's own agents are this RPC's to stop. A nested child is
+      // owned by something that is *waiting on it*, and aborting it out from
+      // under that owner turns another extension's stop into a failed step
+      // here. Defence in depth rather than a live hole: no RPC hands out agent
+      // ids, so a caller has no ordinary way to name one it does not own — but
+      // the guard is cheap and the id may leak some other way. Same
+      // refuse-what-we-should-not-touch stance as `consume` below.
+      if (!isTopLevelAgent(record)) throw new Error("Agent is owned by another agent");
       // Not "not found" — the lookup above already proved it exists. `abort`
       // returns false only for a record that is neither running nor queued,
       // which is an agent that has already finished.

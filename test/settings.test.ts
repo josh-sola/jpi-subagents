@@ -59,7 +59,6 @@ describe("subagents settings (jpi.kdl)", () => {
       widgetMode: "background",
       outputTranscript: true,
       worktreeIsolation: true,
-      workflowsEnabled: "auto",
       maxSubagentDepth: 2,
       fallbackSubagent: "general-purpose",
       reportUsage: false,
@@ -86,17 +85,6 @@ describe("subagents settings (jpi.kdl)", () => {
 
     await newConfig().save({ fallbackSubagent: "scout" });
     expect((await loadSubagentsSettings(newConfig())).value.fallbackSubagent).toBe("scout");
-  });
-
-  it("round-trips workflowsEnabled's auto/true/false arms", async () => {
-    await newConfig().save({ workflowsEnabled: true });
-    expect((await loadSubagentsSettings(newConfig())).value.workflowsEnabled).toBe(true);
-
-    await newConfig().save({ workflowsEnabled: false });
-    expect((await loadSubagentsSettings(newConfig())).value.workflowsEnabled).toBe(false);
-
-    await newConfig().save({ workflowsEnabled: "auto" });
-    expect((await loadSubagentsSettings(newConfig())).value.workflowsEnabled).toBe("auto");
   });
 
   // Back-compat: agentMentions took a plain boolean before "model"/"direct"/"off"
@@ -145,7 +133,6 @@ function makeAppliers(): SettingsAppliers {
     setWidgetMode: vi.fn(),
     setOutputTranscript: vi.fn(),
     setWorktreeIsolation: vi.fn(),
-    setWorkflowsEnabled: vi.fn(),
     setMaxSubagentDepth: vi.fn(),
     setFallbackSubagent: vi.fn(),
     setReportUsage: vi.fn(),
@@ -175,7 +162,6 @@ function fullSettings(overrides: Partial<SubagentsSettings> = {}): SubagentsSett
     widgetMode: "background",
     outputTranscript: true,
     worktreeIsolation: true,
-    workflowsEnabled: "auto",
     maxSubagentDepth: 2,
     fallbackSubagent: "general-purpose",
     reportUsage: false,
@@ -222,19 +208,6 @@ describe("applySettings", () => {
   it("passes a named fallback agent through unchanged", () => {
     applySettings(fullSettings({ fallbackSubagent: "my-router" }), appliers);
     expect(appliers.setFallbackSubagent).toHaveBeenCalledWith("my-router");
-  });
-
-  it("does not call setWorkflowsEnabled when workflowsEnabled is 'auto' — leaves it unpinned", () => {
-    applySettings(fullSettings({ workflowsEnabled: "auto" }), appliers);
-    expect(appliers.setWorkflowsEnabled).not.toHaveBeenCalled();
-  });
-
-  it("calls setWorkflowsEnabled with a pinned boolean in either direction", () => {
-    applySettings(fullSettings({ workflowsEnabled: true }), appliers);
-    expect(appliers.setWorkflowsEnabled).toHaveBeenCalledWith(true);
-
-    applySettings(fullSettings({ workflowsEnabled: false }), appliers);
-    expect(appliers.setWorkflowsEnabled).toHaveBeenCalledWith(false);
   });
 
   // agentMentions used to be a plain boolean before the "model"/"direct"/"off"

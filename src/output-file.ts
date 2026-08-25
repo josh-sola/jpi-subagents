@@ -40,9 +40,6 @@ export function encodeCwd(cwd: string): string {
 /**
  * The per-session scratch directory, created if missing.
  * Mirrors Claude Code's layout: /tmp/{prefix}-{uid}/{encoded-cwd}/{sessionId}/tasks
- *
- * Shared with the workflow tool, which persists each invocation's script here so
- * iterating on one is edit-file-then-rerun — the same convention, one directory.
  */
 export function sessionTaskDir(cwd: string, sessionId: string): string {
   const encoded = encodeCwd(cwd);

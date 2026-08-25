@@ -27,8 +27,8 @@
  * against a Pi that does not aggregate, this fails rather than skipping, which
  * is how the range stays honest. `peerDependencies` moved to `>=0.81.0` for
  * exactly this reason, so the CI floor job runs it too. The floor has since moved
- * on past it (the Workflow tool needs 0.84.0), so this no longer pins the range's
- * lower edge — it still pins the behaviour that made 0.80.x unsupportable.
+ * on past it, so this no longer pins the range's lower edge — it still pins the
+ * behaviour that made 0.80.x unsupportable.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

@@ -104,15 +104,6 @@ const subagentsSchema = j.node({
       .default(true)
       .describe("allow isolation: worktree to create a git worktree"),
     /**
-     * `"auto"` yields to another extension's workflow tool on collision rather
-     * than pinning an answer — see `resolveWorkflowCollisions` in index.ts.
-     * `true`/`false` pin the answer in both directions.
-     */
-    workflowsEnabled: j
-      .union(j.boolean(), j.literal("auto"))
-      .default("auto")
-      .describe("master switch for scripted workflows; auto yields to another extension's workflow tool"),
-    /**
      * Hard ceiling on nested subagent delegation, counted from the main
      * session: main = 0, its subagents = 1, their children = 2.
      */
@@ -192,8 +183,6 @@ export interface SettingsAppliers {
   setWidgetMode: (mode: WidgetMode) => void;
   setOutputTranscript: (b: boolean) => void;
   setWorktreeIsolation: (b: boolean) => void;
-  /** Not called when the persisted value is `"auto"` — that leaves workflows unpinned. */
-  setWorkflowsEnabled: (b: boolean) => void;
   setMaxSubagentDepth: (n: number) => void;
   setFallbackSubagent: (v: string) => void;
   setReportUsage: (b: boolean) => void;
@@ -233,8 +222,6 @@ export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers):
   appliers.setWidgetMode(s.widgetMode);
   appliers.setOutputTranscript(s.outputTranscript);
   appliers.setWorktreeIsolation(s.worktreeIsolation);
-  // "auto" means unpinned — leave the runtime default (unpinned, on) alone.
-  if (s.workflowsEnabled !== "auto") appliers.setWorkflowsEnabled(s.workflowsEnabled);
   appliers.setReportUsage(s.reportUsage);
   appliers.setShowCost(s.showCost);
   appliers.setShowModel(s.showModel);

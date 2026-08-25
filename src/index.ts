@@ -10,8 +10,8 @@
  *   /agents                 — Interactive agent management menu
  */
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
 import { defineTool, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext, getAgentDir, getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import { Container, Key, matchesKey, type SettingItem, SettingsList, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
@@ -31,7 +31,7 @@ import { runMentionClone } from "./mention-clone.js";
 import { describeModel, type ModelRegistry, resolveModel } from "./model-resolver.js";
 import { checkModelScope, isScopeModelsEnabled, setScopeModelsEnabled } from "./model-scope.js";
 import { getMaxSubagentDepth, setMaxSubagentDepth } from "./nested-tools.js";
-import { createOutputFilePath, ensureOutputFile, getOutputTranscriptDefault, sessionTaskDir, setOutputTranscriptDefault, streamToOutputFile, writeInitialEntry } from "./output-file.js";
+import { createOutputFilePath, ensureOutputFile, getOutputTranscriptDefault, setOutputTranscriptDefault, streamToOutputFile, writeInitialEntry } from "./output-file.js";
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
 import { applySettings, createSubagentsConfig, loadSubagentsSettings, type SubagentsSettings, saveAndEmitChanged, type ToolDescriptionMode } from "./settings.js";
@@ -56,22 +56,10 @@ import {
   type Theme,
   type UICtx,
 } from "./ui/agent-widget.js";
-import { FleetList, type FleetUICtx, type FleetWorkflow } from "./ui/fleet-list.js";
+import { FleetList, type FleetUICtx } from "./ui/fleet-list.js";
 import { showSchedulesMenu } from "./ui/schedule-menu.js";
 import { selectItem } from "./ui/select-item.js";
-import { renderWorkflowCard, renderWorkflowEntryCard } from "./ui/workflow-card.js";
-import { openWorkflowFromFleet, showWorkflowsMenu, type WorkflowMenuDeps } from "./ui/workflow-menu.js";
 import { getLifetimeCost, getLifetimeTotal, getSessionContextPercent, type LifetimeUsage, PendingUsagePool, toReportedUsage } from "./usage.js";
-import { decideWorkflowCollision, FOREIGN_WORKFLOW_TOOL_NAMES } from "./workflow/collisions.js";
-import { WORKFLOW_ENTRY_TYPE, type WorkflowEntryData, workflowEntryData } from "./workflow/entry.js";
-import { createWorkflowHost } from "./workflow/host.js";
-import { appendJournal, readJournal, type WorkflowJournalEntry } from "./workflow/journal.js";
-import { extractMeta, type WorkflowMeta, workflowCallName } from "./workflow/meta.js";
-import { elapsedMs } from "./workflow/progress.js";
-import { runWorkflow } from "./workflow/runtime.js";
-import { resolveWorkflowScript } from "./workflow/saved.js";
-import { completeWorkflowTask, createWorkflowTask, failWorkflowTask, formatWorkflowNotification, resolveResumeTarget, updateWorkflowProgressBatch, type WorkflowTask, workflowResultText, workflowRunId } from "./workflow/task.js";
-import { fullWorkflowToolDescription } from "./workflow/tool-description.js";
 import { isWorktreeIsolationEnabled, setWorktreeIsolationEnabled } from "./worktree.js";
 import { escapeXml } from "./xml.js";
 
@@ -288,16 +276,6 @@ export function formatToolsSuffix(cfg: AgentConfig | undefined): string {
   return isFullSet ? "*" : tools.join(", ");
 }
 
-/** CLI flag that runs a workflow script at session start. */
-export const WORKFLOW_FILE_FLAG = "subagents-workflow-file";
-
-/**
- * Re-exported from where they now live, because this is where they were
- * defined and a consumer (or a test) that matched a session entry on
- * {@link WORKFLOW_ENTRY_TYPE} imports it from here.
- */
-export { FOREIGN_WORKFLOW_TOOL_NAMES, WORKFLOW_ENTRY_TYPE, type WorkflowEntryData, workflowEntryData };
-
 export default async function (pi: ExtensionAPI) {
   // Child AgentSessions load normal extensions. Re-entering this extension there
   // would create another manager and leak handlers. Nested orchestration is
@@ -368,25 +346,6 @@ export default async function (pi: ExtensionAPI) {
       return new Text(rendered.join("\n"), 0, 0);
     }
   );
-
-  // ---- Workflow run rendered as a session entry ----
-  // A workflow launched from the CLI flag has no tool call to hang its result
-  // card on, so it renders here instead — through the SAME layout the tool
-  // result uses, not a second one. Custom entries with no registered renderer
-  // are silently dropped by the host, which is why this is registered at
-  // activation rather than lazily.
-  pi.registerEntryRenderer<WorkflowEntryData>(WORKFLOW_ENTRY_TYPE, (entry, _options, theme) =>
-    renderWorkflowEntryCard(entry.data, theme));
-
-  // Registered at activation; READ from session_start. The host applies CLI
-  // values after every extension factory has run, so `getFlag` here would only
-  // ever hand back the registered default (see the read site below).
-  pi.registerFlag(WORKFLOW_FILE_FLAG, {
-    type: "string",
-    description:
-      `Run a workflow script at startup: --${WORKFLOW_FILE_FLAG}=<path>. ` +
-      "Use the `=` form — the space form consumes the next argument, which would swallow a following prompt.",
-  });
 
   // Loaded once, up front, since Config.load() is async and this decides the
   // initial (only strict) custom-agent load below — hundreds of lines before
@@ -572,10 +531,9 @@ export default async function (pi: ExtensionAPI) {
 
   // Background completion: route through group join or send individual nudge
   const manager = new AgentManager((record) => {
-    // Owned children — nested, or a workflow's — report only through their
-    // owner: the parent's scoped tools, or the workflow's card, notification
-    // and dialog. Keep them out of top-level lifecycle, transcript,
-    // notification, and UI channels.
+    // Owned children — nested — report only through their owner: the
+    // parent's scoped tools. Keep them out of top-level lifecycle,
+    // transcript, notification, and UI channels.
     if (!isTopLevelAgent(record)) return;
 
     // Emit lifecycle event based on terminal status
@@ -703,9 +661,6 @@ export default async function (pi: ExtensionAPI) {
   const spawnTopLevel = (piRef: any, ctxRef: any, type: string, prompt: string, options: any) => {
     const safeOptions = { ...(options ?? {}) };
     delete safeOptions.parentAgentId;
-    // Internal too: a forged value would hide an RPC-spawned agent inside
-    // someone else's workflow, and take it out of the concurrency pool with it.
-    delete safeOptions.workflowId;
     delete safeOptions.depth;
     delete safeOptions.maxSubagentDepth;
     delete safeOptions.configCwd;
@@ -848,11 +803,6 @@ export default async function (pi: ExtensionAPI) {
         ),
       );
     }
-    // Last, and only here: CLI flag values are applied by the host AFTER every
-    // extension factory has run, so this is the earliest point the real value
-    // exists. Detached inside — a workflow must not hold up session startup.
-    resolveWorkflowCollisions(ctx);
-    runWorkflowFlag(ctx);
   });
 
   /** Agent types `@` can start, in the shape the roster wants. */
@@ -1112,10 +1062,6 @@ export default async function (pi: ExtensionAPI) {
       delete (globalThis as any)[MANAGER_KEY];
     }
     scheduler.stop();
-    // Before abortAll, and not folded into it: a workflow owns a worker thread
-    // as well as its children, and only its own signal terminates that.
-    for (const task of workflowTasks.values()) task.abortController.abort();
-    workflowTasks.clear();
     manager.abortAll();
     for (const timer of pendingNudges.values()) clearTimeout(timer);
     pendingNudges.clear();
@@ -1184,26 +1130,6 @@ export default async function (pi: ExtensionAPI) {
   let schedulingEnabled = true;
   function isSchedulingEnabled(): boolean { return schedulingEnabled; }
   function setSchedulingEnabled(b: boolean) { schedulingEnabled = b; }
-
-  // Master switch for scripted workflows. Defaults to ON. Off means the
-  // `SubagentWorkflow` tool is never registered: the model is not told the
-  // feature exists (zero context cost) and has nothing to call. The
-  // `/agents → Workflows` view and `--subagents-workflow-file` are refused too, so
-  // there is no second door into the same machinery.
-  //
-  // `workflowsPinned` records that the answer came from the user — a boolean in
-  // jpi.kdl, or the settings toggle — rather than from this default. It
-  // is what `resolveWorkflowCollisions` checks before yielding to another
-  // extension's workflow tool: a default may be overridden by what else is
-  // loaded, an explicit choice may not.
-  let workflowsEnabled = true;
-  let workflowsPinned = false;
-  function isWorkflowsEnabled(): boolean { return workflowsEnabled; }
-  function isWorkflowsPinned(): boolean { return workflowsPinned; }
-  function setWorkflowsEnabled(b: boolean) {
-    workflowsEnabled = b;
-    workflowsPinned = true;
-  }
 
   // ---- Disable default agents configuration ----
   // When enabled, the three hardcoded default agents (general-purpose, Explore,
@@ -1425,7 +1351,6 @@ export default async function (pi: ExtensionAPI) {
     setWidgetMode: setWidgetMode,
     setOutputTranscript: setOutputTranscriptDefault,
     setWorktreeIsolation: setWorktreeIsolationEnabled,
-    setWorkflowsEnabled: setWorkflowsEnabled,
     setMaxSubagentDepth: setMaxSubagentDepth,
     setFallbackSubagent: setFallbackSubagent,
     setReportUsage,
@@ -2302,432 +2227,6 @@ Terse command-style prompts produce shallow, generic work.
   const registeredAgentTool = withUsageReporting(agentTool);
   pi.registerTool(registeredAgentTool);
 
-  // ---- Workflow tool ----
-
-  /**
-   * Live runs, by task id. The tool returns before the run finishes, so its
-   * result card looks the task up here on every render rather than freezing a
-   * snapshot into `details` — that is what makes the inline card follow a
-   * background run.
-   */
-  const workflowTasks = new Map<string, WorkflowTask>();
-
-  /**
-   * Workflow runs as the fleet list wants them.
-   *
-   * Mapped here rather than handing `WorkflowTask` over the seam: the list is
-   * deliberately ignorant of the workflow engine, and a run's counters live in
-   * the progress log rather than on the record, so they are derived per call
-   * the same way the card derives them.
-   */
-  function fleetWorkflows(): FleetWorkflow[] {
-    // Cached counters only, no derivation: the fleet list calls this on a
-    // 200ms tick and reads the roster several times per update, so walking a
-    // run's progress log here would put O(log) work in the render loop.
-    return [...workflowTasks.values()].map(task => ({
-      id: task.id,
-      name: task.meta?.name ?? task.workflowName ?? task.id,
-      status: task.status,
-      doneCount: task.doneCount,
-      totalCount: task.agentCount,
-      startedAt: task.startTime,
-      ...(task.endTime !== undefined ? { completedAt: task.endTime } : {}),
-      tokens: task.totalTokens,
-    }));
-  }
-
-  /**
-   * Run a task to completion against the real manager, settling the record
-   * either way. Never rejects: a run that cannot start (bad `meta`, oversized
-   * source, non-JSON `args`) is a failed workflow, and both callers here are
-   * detached — a rejection would surface as an unhandled one.
-   */
-  async function runWorkflowTask(ctx: ExtensionContext, task: WorkflowTask): Promise<void> {
-    try {
-      const result = await runWorkflow({
-        script: task.script,
-        args: task.args,
-        signal: task.abortController.signal,
-        host: createWorkflowHost({
-          pi,
-          ctx,
-          manager,
-          signal: task.abortController.signal,
-          rootSessionId: ctx.sessionManager.getSessionId(),
-          workflowId: task.id,
-        }),
-        onProgress: entries => updateWorkflowProgressBatch(task, entries),
-        // The dialog's pause / skip / retry keys run through this; it is dropped
-        // again when the task settles.
-        onControl: control => { task.control = control; },
-        journal: {
-          ...(task.replay !== undefined ? { entries: task.replay } : {}),
-          ...(task.journalPath !== undefined
-            ? { append: (entry: WorkflowJournalEntry) => appendJournal(task.journalPath!, entry) }
-            : {}),
-        },
-      });
-      completeWorkflowTask(task, result);
-    } catch (err) {
-      failWorkflowTask(task, err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  /**
-   * Hand a finished run back to the model through the SAME channel a background
-   * agent uses — held briefly by `scheduleNudge`, delivered as a follow-up that
-   * triggers a turn, rendered by the existing `subagent-notification` renderer.
-   */
-  function notifyWorkflowFinished(task: WorkflowTask) {
-    widget.update();
-    fleet.update();
-    const result = workflowResultText(task);
-    scheduleNudge(task.id, () => {
-      pi.sendMessage<NotificationDetails>({
-        customType: "subagent-notification",
-        content: formatWorkflowNotification(task),
-        display: true,
-        details: {
-          id: task.id,
-          description: `Workflow ${task.workflowName ?? task.id}`,
-          status: task.status === "completed" ? "completed" : task.status === "killed" ? "stopped" : "error",
-          toolUses: task.totalToolCalls,
-          // A workflow has agents, not turns; rendering "↻0" would be noise.
-          turnCount: 0,
-          totalTokens: task.totalTokens,
-          durationMs: elapsedMs(task, Date.now()),
-          error: task.error,
-          resultPreview: result.length > 500 ? `${result.slice(0, 500)}…` : result,
-        },
-      }, { deliverAs: "followUp", triggerTurn: true });
-    });
-  }
-
-  // Defined unconditionally, registered only when the feature is on — the same
-  // shape the Agent tool uses. Keeping the definition out of the `if` means the
-  // switch changes exactly one thing: whether pi is ever told about the tool.
-  const workflowTool = defineTool({
-    name: SUBAGENT_TOOL_NAMES.WORKFLOW,
-    label: "SubagentWorkflow",
-    description: renderToolDescriptionTemplate(fullWorkflowToolDescription),
-    promptSnippet: "Run a deterministic script that orchestrates many subagents",
-    promptGuidelines: [
-      "Use SubagentWorkflow when the number of agents depends on something discovered at runtime, when work flows through stages, or when findings should be independently verified. Use Agent for one delegated task or a handful you can name up front.",
-      "Prefer `pipeline` over `parallel` — a barrier costs wall-clock whenever the stages are unevenly sized.",
-      "A workflow runs in the background and notifies you when it finishes — do not poll or sleep waiting for it.",
-    ],
-    parameters: Type.Object({
-      script: Type.Optional(
-        Type.String({
-          maxLength: 524288,
-          description: "Inline workflow source. Must begin with `export const meta = { name, description }`.",
-        }),
-      ),
-      scriptPath: Type.Optional(
-        Type.String({
-          description:
-            "Path to a workflow script file, absolute or relative to the project. Takes precedence over `script` — this is how you re-run an edited workflow.",
-        }),
-      ),
-      name: Type.Optional(
-        Type.String({
-          description:
-            "Name of a saved workflow — `<name>.js` in .agents/workflows/ or the user's agent dir. Lowest precedence: `scriptPath` and `script` both win over it.",
-        }),
-      ),
-      args: Type.Optional(
-        Type.Any({
-          description: "Exposed to the script as the global `args`, verbatim. Must be JSON-shaped.",
-        }),
-      ),
-      resumeFromRunId: Type.Optional(
-        Type.String({
-          pattern: "^wf_[a-z0-9-]{6,}$",
-          description:
-            "Run id of an earlier workflow in this session. Its unchanged leading agent() calls return their recorded results instantly; the first changed or failed call, and everything after it, runs live. Same script and args means nothing re-runs.",
-        }),
-      ),
-      // Accepted and ignored, as in Claude Code. Models reach for them because
-      // every other tool has them, and a hard schema rejection would cost a
-      // whole turn to re-emit a script that was already correct. The `meta`
-      // block is the one place a workflow is named.
-      title: Type.Optional(
-        Type.String({ description: "Ignored — set the workflow title in the script's `meta` block." }),
-      ),
-      description: Type.Optional(
-        Type.String({ description: "Ignored — set the workflow description in the script's `meta` block." }),
-      ),
-    }),
-
-    renderCall(args, theme) {
-      return new Text(
-        `${theme.fg("toolTitle", "▸ ")}${theme.bold(theme.fg("toolTitle", "SubagentWorkflow"))}  ${theme.fg("muted", workflowCallName(args))}`,
-        0,
-        0,
-      );
-    },
-
-    renderResult(result, _options, theme, renderContext) {
-      const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-      const taskId = (result.details as { taskId?: string } | undefined)?.taskId;
-      const task = taskId !== undefined ? workflowTasks.get(taskId) : undefined;
-      // No task means the run predates this session (a reloaded transcript) or
-      // the call never started one — show what `execute` said instead.
-      if (renderContext.isError || !task) return new Text(text, 0, 0);
-      return renderWorkflowCard(
-        {
-          progress: task.workflowProgress,
-          task: {
-            status: task.status,
-            workflowName: task.workflowName,
-            startTime: task.startTime,
-            endTime: task.endTime,
-            totalPausedMs: task.totalPausedMs,
-          },
-          meta: task.meta,
-          agentCount: task.agentCount,
-          totalTokens: task.totalTokens,
-        },
-        theme,
-      );
-    },
-
-    execute: async (toolCallId, params, _signal, _onUpdate, ctx) => {
-      const resumeFrom = resolveResumeTarget(params.resumeFromRunId, workflowTasks);
-      if (resumeFrom !== undefined && !resumeFrom.ok) return textResult(resumeFrom.message);
-
-      // A resume with no source of its own re-runs what that run ran. The
-      // common case is an edited script, but "run that again, cheaply" should
-      // not require repeating a path the run already knows.
-      const resolved = resolveWorkflowScript(
-        params.script === undefined && params.scriptPath === undefined && params.name === undefined
-          && resumeFrom !== undefined
-          ? { scriptPath: resumeFrom.scriptPath }
-          : params,
-        ctx.cwd,
-      );
-      if (!resolved.ok) return textResult(resolved.message);
-
-      // Parsed before anything is scheduled: a bad `meta` is an authoring error
-      // the model can fix immediately, and reporting it as a background run
-      // that failed a second later would just cost a turn.
-      let meta: WorkflowMeta;
-      try {
-        meta = extractMeta(resolved.script).meta;
-      } catch (err) {
-        return textResult(err instanceof Error ? err.message : String(err));
-      }
-
-      const runId = workflowRunId();
-      // Every invocation lands on disk next to the agent transcripts, so
-      // iterating is edit-the-file-then-rerun-with-scriptPath rather than
-      // re-emitting the whole source. The journal sits beside it under the same
-      // id, which is what makes a run id enough to resume from.
-      let savedPath: string | undefined;
-      let journalPath: string | undefined;
-      try {
-        const dir = sessionTaskDir(ctx.cwd, ctx.sessionManager.getSessionId());
-        savedPath = join(dir, `${runId}.workflow.js`);
-        writeFileSync(savedPath, resolved.script, "utf-8");
-        journalPath = join(dir, `${runId}.workflow.jsonl`);
-      } catch (err) {
-        savedPath = undefined;
-        journalPath = undefined;
-        console.warn(`[pi-subagents] could not persist workflow script: ${err instanceof Error ? err.message : String(err)}`);
-      }
-
-      const replay = resumeFrom !== undefined ? readJournal(resumeFrom.journalPath) : undefined;
-
-      const task = createWorkflowTask({
-        id: runId,
-        script: resolved.script,
-        scriptPath: resolved.scriptPath ?? savedPath,
-        args: params.args,
-        meta,
-        toolCallId,
-        ...(journalPath !== undefined ? { journalPath } : {}),
-        ...(replay !== undefined && replay.length > 0 ? { replay, resumedFrom: resumeFrom!.runId } : {}),
-      });
-      workflowTasks.set(runId, task);
-      // The run's own row has to appear now, not when it settles. Its agents
-      // are owned by it, so their lifecycle callbacks no longer refresh these
-      // surfaces — nothing else would register the widget for a run whose
-      // first agent has not started yet.
-      widget.update();
-      fleet.update();
-
-      // Background, like Claude Code: the id comes back now and the run keeps
-      // going without the tool call.
-      void runWorkflowTask(ctx, task).then(() => notifyWorkflowFinished(task));
-
-      return {
-        content: [{
-          type: "text" as const,
-          text:
-            `Workflow "${meta.name}" started in the background.\n` +
-            `Task ID: ${runId}\n` +
-            (task.scriptPath ? `Script: ${task.scriptPath}\n` : "") +
-            (task.resumedFrom !== undefined
-              ? `Resuming ${task.resumedFrom}: ${task.replay?.length ?? 0} recorded call(s) available to replay.\n`
-              : params.resumeFromRunId !== undefined
-                ? `Nothing to replay from ${params.resumeFromRunId} — every agent runs live.\n`
-                : "") +
-            `\nYou will be notified when it finishes — do NOT poll or sleep waiting for it.\n` +
-            `To iterate, edit the script file and call SubagentWorkflow again with scriptPath.`,
-        }],
-        details: { taskId: runId },
-      };
-    },
-  });
-
-  if (isWorkflowsEnabled()) pi.registerTool(workflowTool);
-
-  /**
-   * Act on {@link decideWorkflowCollision} — the half that needs the host.
-   *
-   * The policy (what counts as a conflict, what a pin changes, whether there is
-   * anything left to withdraw) lives in `workflow/collisions.ts`; this is the
-   * host-facing shell around it: read the registry, warn, and take our tool out
-   * of the active set.
-   *
-   * ## Why this can only happen at session_start
-   *
-   * `getAllTools` throws during extension loading ("Action methods cannot be
-   * called during extension loading"), and load order means a check at
-   * registration time could not see an extension that has not loaded yet. So
-   * the decision cannot gate `registerTool`; it has to undo it. `setActiveTools`
-   * is what makes that real rather than cosmetic — pi rebuilds the system
-   * prompt from the new set, and `session_start` runs before any turn, so the
-   * model never sees a spec we withdrew. A later `_refreshToolRegistry` keeps
-   * the active set it had and only adds names new to the registry, so ours does
-   * not creep back.
-   *
-   * Best-effort and swallowed. A diagnostic that took the session down would be
-   * worse than the collision it reports.
-   */
-  let collisionsChecked = false;
-  function resolveWorkflowCollisions(ctx: ExtensionContext): void {
-    if (collisionsChecked) return;
-    collisionsChecked = true;
-
-    const warn = (message: string) => {
-      if (ctx.hasUI) ctx.ui.notify(message, "warning");
-      else console.warn(`[pi-subagents] ${message}`);
-    };
-
-    try {
-      if (!isWorkflowsEnabled()) return;
-
-      const verdict = decideWorkflowCollision({
-        tools: pi.getAllTools(),
-        // Identifies our own registration: this extension does not know its
-        // install path, and the description is the one field certainly ours.
-        ownDescription: workflowTool.description,
-        pinned: isWorkflowsPinned(),
-      });
-      if (verdict.kind === "none") return;
-      if (verdict.kind === "report") {
-        warn(verdict.message);
-        return;
-      }
-
-      workflowsEnabled = false; // not setWorkflowsEnabled: this is not the user pinning it
-      widget.update();
-      fleet.update();
-      warn(verdict.message);
-
-      if (!verdict.withdraw) return;
-      const active = pi.getActiveTools();
-      if (active.includes(SUBAGENT_TOOL_NAMES.WORKFLOW)) {
-        pi.setActiveTools(active.filter(name => name !== SUBAGENT_TOOL_NAMES.WORKFLOW));
-      }
-    } catch {
-      // getAllTools/setActiveTools are unavailable in some hosts (print mode,
-      // RPC). Not being able to check is not a reason to fail the session.
-    }
-  }
-
-  /**
-   * `--subagents-workflow-file=<path>` — run a script at startup, with no LLM
-   * round-trip deciding whether to call the tool.
-   *
-   * Read here rather than at activation because that is the only place the real
-   * value exists: the host activates extensions first and applies collected CLI
-   * flags second, so `getFlag` during activation returns the registered default
-   * and nothing else. `examples/extensions/ssh.ts` reads its flag from
-   * session_start for exactly this reason.
-   */
-  let workflowFlagHandled = false;
-  function runWorkflowFlag(ctx: ExtensionContext): void {
-    if (workflowFlagHandled) return;
-    const flag = pi.getFlag(WORKFLOW_FILE_FLAG);
-    if (flag === undefined || flag === false) return;
-    workflowFlagHandled = true;
-
-    const report = (message: string, level: "info" | "warning") => {
-      if (ctx.hasUI) ctx.ui.notify(message, level);
-      else console.warn(`[pi-subagents] ${message}`);
-    };
-
-    // The flag is the same machinery by another door, so the master switch has
-    // to close it too — silently ignoring a flag the user typed would be worse
-    // than saying why nothing ran.
-    if (!isWorkflowsEnabled()) {
-      report(
-        `--${WORKFLOW_FILE_FLAG} ignored: workflows are off. Turn them on in /agents → Settings → Workflows, ` +
-          'or set `workflows-enabled #true` in the `subagents { }` jpi.kdl section.',
-        "warning",
-      );
-      return;
-    }
-
-    // A bare `--subagents-workflow-file` parses to boolean `true`. Say what was
-    // missing rather than reading a file called "true".
-    if (typeof flag !== "string" || flag.trim() === "") {
-      report(`--${WORKFLOW_FILE_FLAG} needs a path: --${WORKFLOW_FILE_FLAG}=<path>`, "warning");
-      return;
-    }
-
-    const path = isAbsolute(flag.trim()) ? flag.trim() : join(ctx.cwd, flag.trim());
-    let script: string;
-    try {
-      script = readFileSync(path, "utf-8");
-    } catch (err) {
-      report(`Could not read ${path}: ${err instanceof Error ? err.message : String(err)}`, "warning");
-      return;
-    }
-
-    let meta: WorkflowMeta | undefined;
-    try {
-      meta = extractMeta(script).meta;
-    } catch (err) {
-      report(err instanceof Error ? err.message : String(err), "warning");
-      return;
-    }
-
-    const task = createWorkflowTask({ id: workflowRunId(), script, scriptPath: path, meta });
-    workflowTasks.set(task.id, task);
-    widget.update();
-    fleet.update();
-    report(`Running workflow ${meta.name}…`, "info");
-
-    // Detached: session_start is awaited by the host, and a workflow can run for
-    // minutes — blocking here would hold the whole session's startup.
-    void runWorkflowTask(ctx, task).then(() => {
-      // No tool call to attach a result card to, so the card becomes a session
-      // entry (same layout), and the outcome is handed to the model as context
-      // for its next turn rather than forcing one.
-      pi.appendEntry<WorkflowEntryData>(WORKFLOW_ENTRY_TYPE, workflowEntryData(task));
-      pi.sendMessage({
-        customType: "workflow-result",
-        content: formatWorkflowNotification(task),
-        display: false,
-      }, { deliverAs: "nextTurn" });
-      widget.update();
-      fleet.update();
-    });
-  }
-
   // ---- get_subagent_result tool ----
 
   registerToolReportingUsage(defineTool({
@@ -2924,12 +2423,6 @@ Terse command-style prompts produce shallow, generic work.
       options.push(`Scheduled jobs (${jobCount})`);
     }
 
-    // Workflow runs, on the same terms as scheduled jobs: shown only when the
-    // feature is on, so the menu never advertises something switched off.
-    if (isWorkflowsEnabled()) {
-      options.push(`Workflows (${workflowTasks.size})`);
-    }
-
     // Actions
     options.push("Create new agent");
     options.push("Settings");
@@ -2955,9 +2448,6 @@ Terse command-style prompts produce shallow, generic work.
       await showAgentsMenu(ctx);
     } else if (choice.startsWith("Scheduled jobs (")) {
       await showSchedulesMenu(ctx, scheduler);
-      await showAgentsMenu(ctx);
-    } else if (choice.startsWith("Workflows (")) {
-      await showWorkflowsMenu(ctx, workflowMenuDeps);
       await showAgentsMenu(ctx);
     } else if (choice === "Create new agent") {
       await showCreateWizard(ctx);
@@ -3438,11 +2928,6 @@ Write the file using the write tool. Only write the file, nothing else.`;
       widgetMode: getWidgetMode(),
       outputTranscript: getOutputTranscriptDefault(),
       worktreeIsolation: isWorktreeIsolationEnabled(),
-      // The user's answer, not the effective one. A stand-down for another
-      // extension's workflow tool is scoped to the session that detected the
-      // collision; "auto" (the schema default) leaves that scoped decision
-      // alone instead of freezing today's yield/no-yield verdict into jpi.kdl.
-      workflowsEnabled: isWorkflowsPinned() ? isWorkflowsEnabled() : "auto",
       maxSubagentDepth: getMaxSubagentDepth(),
       // `false` is the KDL spelling of the NO_FALLBACK sentinel — the reverse
       // of applySettings' mapping. `?? "general-purpose"` only matters before
@@ -3540,15 +3025,6 @@ Write the file using the write tool. Only write the file, nothing else.`;
           label: "Scheduling",
           description: "Schedule subagent feature (off removes `schedule` param from Agent tool spec on next pi session)",
           currentValue: isSchedulingEnabled() ? "on" : "off",
-          values: ["on", "off"],
-        },
-        {
-          id: "workflowsEnabled",
-          label: "Workflows",
-          description:
-            "Scripted workflows, on unless another extension provides a workflow tool "
-            + "(off keeps the SubagentWorkflow tool out of the tool spec; applies on next pi session)",
-          currentValue: isWorkflowsEnabled() ? "on" : "off",
           values: ["on", "off"],
         },
         {
@@ -3728,20 +3204,6 @@ Write the file using the write tool. Only write the file, nothing else.`;
           void notifyApplied(
             ctx,
             `Scheduling ${enabled ? "enabled" : "disabled"}. Tool spec change takes effect on next pi session.`,
-          );
-        }
-      } else if (id === "workflowsEnabled") {
-        const enabled = value === "on";
-        if (enabled === isWorkflowsEnabled()) {
-          ctx.ui.notify(`Workflows already ${enabled ? "enabled" : "disabled"}.`, "info");
-        } else {
-          setWorkflowsEnabled(enabled);
-          // Runs already in flight keep going: the switch governs whether the
-          // tool is offered, and killing live agents on a settings toggle would
-          // lose work the user never asked to discard.
-          void notifyApplied(
-            ctx,
-            `Workflows ${enabled ? "enabled" : "disabled"}. Tool spec change takes effect on next pi session.`,
           );
         }
       } else if (id === "scopeModels") {
@@ -3948,20 +3410,4 @@ Write the file using the write tool. Only write the file, nothing else.`;
     description: "Manage agents",
     handler: async (_args, ctx) => { await showAgentsMenu(ctx); },
   });
-
-  /**
-   * What `/agents → Workflows` and the fleet list's `workflow` rows need from
-   * here. One object, built once: both entry points open the same inspector,
-   * and handing them different views of the session would let the two drift.
-   */
-  const workflowMenuDeps: WorkflowMenuDeps = {
-    tasks: workflowTasks,
-    getRecord: id => manager.getRecord(id),
-    viewAgentConversation,
-    // Read lazily: `currentCtx` is rebound on every session_start, and the
-    // fleet list may act between sessions, when there is none.
-    getCtx: () => currentCtx as unknown as ExtensionCommandContext | undefined,
-  };
-
-  fleet.setWorkflowSource(fleetWorkflows, id => openWorkflowFromFleet(id, workflowMenuDeps));
 }
