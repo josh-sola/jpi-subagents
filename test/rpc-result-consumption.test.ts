@@ -96,7 +96,7 @@ describe("subagents:rpc:consume", () => {
     prevCwd = process.cwd();
     writeFileSync(
       join(agentDir, "jpi.kdl"),
-      "subagents {\n  scheduling-enabled #false\n  output-transcript #false\n}\n",
+      "subagents {\n  output-transcript #false\n}\n",
     );
     process.chdir(tmpDir);
   });

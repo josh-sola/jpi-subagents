@@ -95,7 +95,6 @@ describe("Agent tool — background resume wiring", () => {
     previousHome = process.env.HOME;
     process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.HOME = agentDir;
-    writeFileSync(join(agentDir, "jpi.kdl"), "subagents {\n  scheduling-enabled #false\n}\n");
     mkdirSync(join(agentDir, "agents"), { recursive: true });
     process.chdir(cwd);
 

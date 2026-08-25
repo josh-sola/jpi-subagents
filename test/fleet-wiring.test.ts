@@ -89,7 +89,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     // debounce), so fleet.onAgentFinished fires synchronously on the result.
     writeFileSync(
       join(agentDir, "jpi.kdl"),
-      'subagents {\n  scheduling-enabled #false\n  default-join-mode "async"\n}\n',
+      'subagents {\n  default-join-mode "async"\n}\n',
     );
     process.chdir(tmpDir);
   });

@@ -21,7 +21,7 @@
  * and "not found" was the correct answer. Test 3 pins the eviction rule that
  * DOES apply, so the two are not confused again.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -111,9 +111,8 @@ describe("issue #174: foreground agent that hits max_turns", () => {
   let prevHome: string | undefined;
 
   beforeEach(() => {
-    // Hermetic cwd + global dir, scheduling off — same isolation as
-    // clear-completed-wiring.test.ts, so session_start doesn't spin a
-    // scheduler or touch the dev's filesystem.
+    // Hermetic cwd + global dir — same isolation as clear-completed-wiring.test.ts,
+    // so session_start doesn't touch the dev's filesystem.
     tmpDir = mkdtempSync(join(tmpdir(), "pi-174-"));
     agentDir = mkdtempSync(join(tmpdir(), "pi-174-agentdir-"));
     prevAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -121,7 +120,6 @@ describe("issue #174: foreground agent that hits max_turns", () => {
     process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.HOME = agentDir;
     prevCwd = process.cwd();
-    writeFileSync(join(agentDir, "jpi.kdl"), "subagents {\n  scheduling-enabled #false\n}\n");
     process.chdir(tmpDir);
   });
 

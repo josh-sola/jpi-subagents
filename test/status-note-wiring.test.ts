@@ -40,12 +40,9 @@ function makePi() {
 }
 
 // The RPC channels are registered on the first bound session_start (#142), so a
-// test that drives them must fire it first — as a real session always does. A
-// sessionId-less ctx makes startScheduler short-circuit (no filesystem touch).
+// test that drives them must fire it first — as a real session always does.
 async function bind(lifecycle: Map<string, any>) {
-  const bindCtx = ctx();
-  bindCtx.sessionManager.getSessionId = vi.fn(() => undefined);
-  await lifecycle.get("session_start")({}, bindCtx);
+  await lifecycle.get("session_start")({}, ctx());
 }
 
 function ctx() {
@@ -138,7 +135,7 @@ describe("status note reaches the parent through the real handlers", () => {
     expect(out).toContain("the task is unfinished");
     // State only, here most of all. Advice to re-spawn would re-run work a human
     // deliberately killed; advice to ask first presumes someone is there to ask,
-    // which is false under `pi -p`, scheduled jobs, and background-driven runs.
+    // which is false under `pi -p` and background-driven runs.
     expect(out).not.toContain("re-spawn");
     expect(out).not.toContain("ask before");
   });

@@ -15,7 +15,7 @@
  * a mock ExtensionAPI and assert the timing: nothing is wired at factory time;
  * everything is wired (once) on session_start.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -87,8 +87,8 @@ describe("issue #142: RPC handlers + subagents:ready are gated on session_start"
   let prevHome: string | undefined;
 
   beforeEach(() => {
-    // Hermetic cwd + global dir with scheduling off, so session_start doesn't
-    // spin a scheduler or touch the dev's filesystem — isolates the RPC wiring.
+    // Hermetic cwd + global dir, so session_start doesn't touch the dev's
+    // filesystem — isolates the RPC wiring.
     tmpDir = mkdtempSync(join(tmpdir(), "pi-142-"));
     agentDir = mkdtempSync(join(tmpdir(), "pi-142-agentdir-"));
     prevAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -96,7 +96,6 @@ describe("issue #142: RPC handlers + subagents:ready are gated on session_start"
     process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.HOME = agentDir;
     prevCwd = process.cwd();
-    writeFileSync(join(agentDir, "jpi.kdl"), "subagents {\n  scheduling-enabled #false\n}\n");
     process.chdir(tmpDir);
   });
 

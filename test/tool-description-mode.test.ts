@@ -190,24 +190,6 @@ describe("toolDescriptionMode", () => {
     expect(desc).not.toContain("## Usage notes");
   });
 
-  it("{{scheduleGuideline}} expands to the schedule bullet when scheduling is on (default)", async () => {
-    const tools = await setup({ toolDescriptionMode: "custom" }, () => {
-      writeFileSync(join(hermeticAgentDir, "agent-tool-description.md"), "RULES:{{scheduleGuideline}}\nEND");
-    });
-    const desc: string = tools.get("Agent").description;
-    // The expansion carries its own leading "\n- " bullet.
-    expect(desc).toContain("RULES:\n- Use `schedule` only when");
-  });
-
-  it("{{scheduleGuideline}} expands to the empty string when scheduling is disabled", async () => {
-    const tools = await setup({ toolDescriptionMode: "custom", schedulingEnabled: false }, () => {
-      writeFileSync(join(hermeticAgentDir, "agent-tool-description.md"), "RULES:{{scheduleGuideline}}\nEND");
-    });
-    const desc: string = tools.get("Agent").description;
-    expect(desc).toContain("RULES:\nEND");
-    expect(desc).not.toContain("schedule");
-  });
-
   it("{{isolationGuideline}} expands to the isolation bullet when worktrees are on (default)", async () => {
     const tools = await setup({ toolDescriptionMode: "custom" }, () => {
       writeFileSync(join(hermeticAgentDir, "agent-tool-description.md"), "RULES:{{isolationGuideline}}\nEND");
@@ -229,7 +211,7 @@ describe("toolDescriptionMode", () => {
     const tools = await setup({ toolDescriptionMode: "custom" }, () => {
       writeFileSync(
         join(hermeticAgentDir, "agent-tool-description.md"),
-        "A {{typeList}} B {{compactTypeList}} C {{agentDir}} D {{scheduleGuideline}} E {{isolationGuideline}} F",
+        "A {{typeList}} B {{compactTypeList}} C {{agentDir}} D {{isolationGuideline}} F",
       );
     });
     const desc: string = tools.get("Agent").description;
@@ -269,28 +251,6 @@ describe("toolDescriptionMode", () => {
     }
   });
 
-  // README:87 promises that disabling scheduling "removes `schedule` from the
-  // `Agent` tool spec (no LLM-context cost)". Only the {{scheduleGuideline}}
-  // TEXT expansion was tested — nothing asserted the schema itself, so the
-  // parameter could keep costing tokens (and stay callable) while the prose
-  // claimed otherwise.
-  describe("schedulingEnabled gates the schedule parameter", () => {
-    const props = (tools: Map<string, any>) =>
-      Object.keys(tools.get("Agent").parameters?.properties ?? {});
-
-    it("advertises `schedule` by default", async () => {
-      expect(props(await setup())).toContain("schedule");
-    });
-
-    it("removes `schedule` from the tool schema when scheduling is disabled", async () => {
-      const names = props(await setup({ schedulingEnabled: false }));
-      expect(names).not.toContain("schedule");
-      // The rest of the parameter surface is untouched — this gates one field,
-      // not the tool.
-      expect(names).toEqual(expect.arrayContaining(["prompt", "description", "subagent_type"]));
-    });
-  });
-
   // The schema half of `worktreeIsolation: false` shipped without the prose
   // half: `isolationParam` dropped the field while both descriptions kept
   // telling the model to pass it. Nothing rejects the undeclared key (TypeBox
@@ -313,8 +273,8 @@ describe("toolDescriptionMode", () => {
       const names = props(tools);
       expect(names).not.toContain("isolation");
       expect(tools.get("Agent").description).not.toContain("isolation");
-      // One field, not the tool — and the neighbouring gate is unaffected.
-      expect(names).toEqual(expect.arrayContaining(["prompt", "description", "subagent_type", "schedule"]));
+      // One field, not the tool.
+      expect(names).toEqual(expect.arrayContaining(["prompt", "description", "subagent_type"]));
     });
 
     it("drops the compact description's bullet too", async () => {

@@ -297,7 +297,7 @@ export class AgentWidget {
    *   - `off`: none (the widget's existing empty-state path hides it entirely).
    *   - `background`: drop only agents *known* to be foreground
    *     (`isBackground === false`); keep everything else — background, queued,
-   *     scheduled, or RPC-spawned (`undefined`). Keying off the `isBackground`
+   *     or RPC-spawned (`undefined`). Keying off the `isBackground`
    *     record flag rather than the UI-only `invocation` snapshot (which only the
    *     Agent-tool path sets), and excluding rather than allow-listing, means
    *     only proven-foreground runs drop out — nothing else silently vanishes.

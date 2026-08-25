@@ -76,7 +76,6 @@ describe("output_transcript agent wiring", () => {
     previousHome = process.env.HOME;
     process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.HOME = agentDir;
-    writeFileSync(join(agentDir, "jpi.kdl"), "subagents {\n  scheduling-enabled #false\n}\n");
     mkdirSync(join(agentDir, "agents"), { recursive: true });
     process.chdir(cwd);
     vi.mocked(runAgent).mockImplementation(async (_ctx, _type, _prompt, options) => {
@@ -159,7 +158,7 @@ describe("output_transcript agent wiring", () => {
     // A plain default agent (no frontmatter) inherits the project default.
     writeFileSync(
       join(agentDir, "jpi.kdl"),
-      "subagents {\n  scheduling-enabled #false\n  output-transcript #false\n}\n",
+      "subagents {\n  output-transcript #false\n}\n",
     );
     const { pi, tools, lifecycle } = makePi();
     await subagentsExtension(pi);
@@ -181,7 +180,7 @@ describe("output_transcript agent wiring", () => {
   it("lets agent frontmatter output_transcript true override a project outputTranscript false", async () => {
     writeFileSync(
       join(agentDir, "jpi.kdl"),
-      "subagents {\n  scheduling-enabled #false\n  output-transcript #false\n}\n",
+      "subagents {\n  output-transcript #false\n}\n",
     );
     writeFileSync(join(agentDir, "agents", "audited.md"), `---\ndescription: Always keeps a transcript\noutput_transcript: true\n---\n\nWrite a transcript regardless of the project default.`);
     const { pi, tools, lifecycle } = makePi();

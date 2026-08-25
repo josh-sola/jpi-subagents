@@ -126,7 +126,7 @@ describe("AgentWidget", () => {
     expect(renderLines(manager, "foreground", () => "background")).toBe("");
   });
 
-  // Also covers scheduler-spawned agents (isBackground=true, no `invocation`
+  // Also covers RPC-spawned agents (isBackground=true, no `invocation`
   // snapshot): if the filter still keyed off `invocation.runInBackground` —
   // #118's original approach — this would wrongly vanish.
   it("renders background agents in 'background' mode", () => {
@@ -335,10 +335,10 @@ describe("AgentWidget cost display", () => {
   });
 
   it("shows stats for an agent nobody is tracking live", () => {
-    // A scheduled agent has no activity entry — it spawns through the manager
-    // directly — and used to render with no tokens and no cost at all.
+    // An RPC-spawned agent has no activity entry — it spawns through the
+    // manager directly — and used to render with no tokens and no cost at all.
     const running = {
-      id: "sched", type: "general-purpose", description: "scheduled agent", status: "running",
+      id: "rpc", type: "general-purpose", description: "RPC-spawned agent", status: "running",
       toolUses: 1, startedAt: Date.now(),
       lifetimeUsage: { input: 1000, output: 200, cacheWrite: 0, cost: 0.0042 },
       compactionCount: 0,

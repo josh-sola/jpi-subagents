@@ -97,8 +97,8 @@ export function toReportedUsage(u: LifetimeUsage): ReportedUsage | undefined {
  * Subagents run in their own pi sessions, so none of what they spend appears in
  * the parent's `getSessionStats()`. Pi does aggregate `toolResult.usage` into
  * those stats, though — so the way back into the parent's footer and `/cost` is
- * to hang the spend on a tool result. Background and scheduled agents finish
- * between tool calls with nothing to hang it on, hence a pool: every assistant
+ * to hang the spend on a tool result. Background agents finish between tool
+ * calls with nothing to hang it on, hence a pool: every assistant
  * message lands here as it happens, and the next tool result we return carries
  * whatever has accumulated.
  *

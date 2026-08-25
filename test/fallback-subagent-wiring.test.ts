@@ -9,7 +9,7 @@
  * spawns would be no fix at all. The fallback tests assert the opposite — that
  * it ran, and which agent it ran.
  */
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -184,27 +184,6 @@ describe("fallbackSubagent gates dispatch through the real Agent tool", () => {
 
     expect(textOf(result)).toContain("Unknown or disabled agent type");
     expect(runAgent).not.toHaveBeenCalled();
-  });
-
-  it("never persists a blank type into a scheduled job", async () => {
-    // `fellBackFrom` is "" for a blank request, and `??` does not treat "" as
-    // nullish — the job would be stored with an empty type and re-fail forever.
-    const { tools, lifecycle } = await boot();
-    await lifecycle.get("session_start")({}, ctx());
-
-    const result = await tools.get("Agent").execute(
-      "tc-5",
-      { prompt: "later", description: "blank type", subagent_type: "   ", schedule: "+1h" },
-      undefined, undefined, ctx(),
-    );
-    expect(textOf(result)).toContain("Scheduled");
-
-    const storeDir = join(cwd, "agent-dir", "jpi", "subagents");
-    const jobs = readdirSync(storeDir)
-      .filter((f) => f.startsWith("schedules-"))
-      .flatMap((f) => JSON.parse(readFileSync(join(storeDir, f), "utf-8")).jobs ?? []);
-    expect(jobs).toHaveLength(1);
-    expect(jobs[0].subagent_type).toBe("general-purpose");
   });
 
   it("never blocks resume, which ignores subagent_type entirely", async () => {

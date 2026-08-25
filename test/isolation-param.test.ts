@@ -8,9 +8,9 @@ import { isolationParam } from "../src/invocation-config.js";
  * As a single-value optional literal it gave models that fill every optional
  * parameter nothing harmless to fill it with: the session log on #231 shows one
  * emitting `isolation: "worktree"` on three consecutive calls — alongside
- * `resume: ""` and `schedule: ""` — while its own reasoning, its message to the
- * user, and two explicit user instructions all said to omit the field. A second
- * legal value is what lets it comply.
+ * `resume: ""` — while its own reasoning, its message to the user, and two
+ * explicit user instructions all said to omit the field. A second legal value
+ * is what lets it comply.
  */
 describe("isolationParam", () => {
   function schema(enabled: boolean) {
@@ -39,8 +39,8 @@ describe("isolationParam", () => {
   });
 
   it("omits the parameter entirely when the project disabled worktrees", () => {
-    // Nothing to pass beats accepting it and quietly downgrading — and it costs
-    // the model no context in disabled mode, as `scheduleParam` already does.
+    // Nothing to pass beats accepting it and quietly downgrading — and it
+    // costs the model no context in disabled mode.
     expect(isolationParam(false)).toEqual({});
   });
 });

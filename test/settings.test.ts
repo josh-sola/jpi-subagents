@@ -48,7 +48,6 @@ describe("subagents settings (jpi.kdl)", () => {
       graceTurns: 5,
       defaultJoinMode: "smart",
       backgroundByDefault: true,
-      schedulingEnabled: true,
       scopeModels: false,
       strictAgentFiles: false,
       disableDefaultAgents: false,
@@ -70,12 +69,12 @@ describe("subagents settings (jpi.kdl)", () => {
   });
 
   it("round-trips a partial save: changed fields persist, the rest stay default", async () => {
-    const saveResult = await newConfig().save({ maxConcurrent: 4, schedulingEnabled: false });
+    const saveResult = await newConfig().save({ maxConcurrent: 4, scopeModels: true });
     expect(saveResult.issues).toEqual([]);
 
     const loaded = await loadSubagentsSettings(newConfig());
     expect(loaded.value.maxConcurrent).toBe(4);
-    expect(loaded.value.schedulingEnabled).toBe(false);
+    expect(loaded.value.scopeModels).toBe(true);
     expect(loaded.value.graceTurns).toBe(5);
   });
 
@@ -122,7 +121,6 @@ function makeAppliers(): SettingsAppliers {
     setGraceTurns: vi.fn(),
     setDefaultJoinMode: vi.fn(),
     setBackgroundByDefault: vi.fn(),
-    setSchedulingEnabled: vi.fn(),
     setScopeModels: vi.fn(),
     setStrictAgentFiles: vi.fn(),
     setDisableDefaultAgents: vi.fn(),
@@ -151,7 +149,6 @@ function fullSettings(overrides: Partial<SubagentsSettings> = {}): SubagentsSett
     graceTurns: 5,
     defaultJoinMode: "smart",
     backgroundByDefault: true,
-    schedulingEnabled: true,
     scopeModels: false,
     strictAgentFiles: false,
     disableDefaultAgents: false,
@@ -185,7 +182,6 @@ describe("applySettings", () => {
     expect(appliers.setGraceTurns).toHaveBeenCalledWith(3);
     expect(appliers.setDefaultJoinMode).toHaveBeenCalledWith("group");
     expect(appliers.setMaxConcurrentForeground).toHaveBeenCalledWith(0);
-    expect(appliers.setSchedulingEnabled).toHaveBeenCalledWith(true);
     expect(appliers.setScopeModels).toHaveBeenCalledWith(false);
     expect(appliers.setStrictAgentFiles).toHaveBeenCalledWith(false);
     expect(appliers.setToolDescriptionMode).toHaveBeenCalledWith("full");

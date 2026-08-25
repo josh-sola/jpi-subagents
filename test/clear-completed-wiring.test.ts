@@ -12,7 +12,7 @@
  * real background agent, let it complete, fire the real session event, then read
  * it back through the real tool — the exact path the reporter hit.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -99,8 +99,8 @@ describe("issue #108: unread completed background agents survive session events"
   let prevHome: string | undefined;
 
   beforeEach(() => {
-    // Hermetic cwd + global dir, scheduling off, so session_start doesn't spin a
-    // scheduler or touch the dev's filesystem — isolates the clearCompleted path.
+    // Hermetic cwd + global dir, so session_start doesn't touch the dev's
+    // filesystem — isolates the clearCompleted path.
     tmpDir = mkdtempSync(join(tmpdir(), "pi-108-"));
     agentDir = mkdtempSync(join(tmpdir(), "pi-108-agentdir-"));
     prevAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -108,7 +108,6 @@ describe("issue #108: unread completed background agents survive session events"
     process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.HOME = agentDir;
     prevCwd = process.cwd();
-    writeFileSync(join(agentDir, "jpi.kdl"), "subagents {\n  scheduling-enabled #false\n}\n");
     process.chdir(tmpDir);
   });
 

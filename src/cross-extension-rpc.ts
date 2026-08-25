@@ -104,10 +104,9 @@ export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
 
       // Cross-extension RPC callers (e.g. pi-tasks TaskExecute) naturally
       // forward serializable values, so options.model can be a string like
-      // "openai-codex/gpt-5.5". Resolve it to a real Model instance here
-      // — same pattern the scheduler path already uses — so the spawned
-      // agent's auth lookup doesn't crash with "No API key found for
-      // undefined".
+      // "openai-codex/gpt-5.5". Resolve it to a real Model instance here so
+      // the spawned agent's auth lookup doesn't crash with "No API key found
+      // for undefined".
       let normalizedOptions = options ?? {};
       // `!= null` on purpose: a JSON-forwarding caller can serialize an unset
       // field as null, and the runner reads `options.model ?? default`, so null

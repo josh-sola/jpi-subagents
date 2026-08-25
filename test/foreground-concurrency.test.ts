@@ -195,8 +195,8 @@ describe("maxConcurrentForeground", () => {
     manager.setMaxConcurrentForeground(1);
 
     void fg(manager, "holder");
-    void fg(manager, "scheduled", { bypassQueue: true });
-    expect(recordFor(manager, "scheduled").status).toBe("running");
+    void fg(manager, "generated", { bypassQueue: true });
+    expect(recordFor(manager, "generated").status).toBe("running");
 
     // Counted, not invisible: the pool is now over its limit, so the next
     // ordinary blocking spawn queues.

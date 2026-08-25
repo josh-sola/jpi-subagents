@@ -39,10 +39,6 @@ const subagentsSchema = j.node({
       .boolean()
       .default(true)
       .describe("an Agent call that doesn't say run_in_background runs detached"),
-    schedulingEnabled: j
-      .boolean()
-      .default(true)
-      .describe("master switch for the schedule subagent feature"),
     /**
      * When true, the effective model of each subagent spawn is validated
      * against `enabledModels` from pi's settings. No-op when pi's
@@ -172,7 +168,6 @@ export interface SettingsAppliers {
   setGraceTurns: (n: number) => void;
   setDefaultJoinMode: (mode: JoinMode) => void;
   setBackgroundByDefault: (b: boolean) => void;
-  setSchedulingEnabled: (b: boolean) => void;
   setScopeModels: (enabled: boolean) => void;
   setStrictAgentFiles: (b: boolean) => void;
   setDisableDefaultAgents: (b: boolean) => void;
@@ -207,7 +202,6 @@ export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers):
   appliers.setFallbackSubagent(s.fallbackSubagent === false ? NO_FALLBACK : s.fallbackSubagent);
   appliers.setDefaultJoinMode(s.defaultJoinMode);
   appliers.setBackgroundByDefault(s.backgroundByDefault);
-  appliers.setSchedulingEnabled(s.schedulingEnabled);
   appliers.setScopeModels(s.scopeModels);
   appliers.setStrictAgentFiles(s.strictAgentFiles);
   appliers.setDisableDefaultAgents(s.disableDefaultAgents);
