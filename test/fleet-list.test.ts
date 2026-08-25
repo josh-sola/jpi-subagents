@@ -10,6 +10,7 @@ import {
   type FleetWorkflow,
   formatFleetElapsed,
   formatFleetTokens,
+  orderAgentsAsTree,
 } from "../src/ui/fleet-list.js";
 
 // ---- Key sequences (see node_modules/@earendil-works/pi-tui/dist/keys.js) ----
@@ -198,20 +199,72 @@ describe("formatFleetTokens", () => {
   });
 });
 
+describe("orderAgentsAsTree", () => {
+  it("puts each agent's visible children directly after it, sorted by startedAt", () => {
+    const top = makeRecord({ id: "top", startedAt: 1000 });
+    const childB = makeRecord({ id: "b", parentAgentId: "top", startedAt: 3000 });
+    const childA = makeRecord({ id: "a", parentAgentId: "top", startedAt: 2000 });
+    const entries = orderAgentsAsTree([top, childB, childA]);
+    expect(entries.map(e => e.record.id)).toEqual(["top", "a", "b"]);
+    expect(entries.map(e => e.depth)).toEqual([0, 1, 1]);
+  });
+
+  it("keeps top-level agents sorted earliest-first, each followed by its own subtree", () => {
+    const older = makeRecord({ id: "older", startedAt: 1000 });
+    const newer = makeRecord({ id: "newer", startedAt: 2000 });
+    const childOfNewer = makeRecord({ id: "child", parentAgentId: "newer", startedAt: 2500 });
+    const entries = orderAgentsAsTree([newer, childOfNewer, older]);
+    expect(entries.map(e => e.record.id)).toEqual(["older", "newer", "child"]);
+  });
+
+  it("nests grandchildren at depth 2 under their own parent, not the root", () => {
+    const top = makeRecord({ id: "top", startedAt: 1000 });
+    const child = makeRecord({ id: "child", parentAgentId: "top", startedAt: 2000 });
+    const grandchild = makeRecord({ id: "grandchild", parentAgentId: "child", startedAt: 3000 });
+    const entries = orderAgentsAsTree([top, child, grandchild]);
+    expect(entries.map(e => [e.record.id, e.depth])).toEqual([
+      ["top", 0], ["child", 1], ["grandchild", 2],
+    ]);
+  });
+
+  it("promotes an orphan (parent not in the visible set) to an unindented top-level row", () => {
+    const orphan = makeRecord({ id: "orphan", parentAgentId: "gone", startedAt: 1000 });
+    const other = makeRecord({ id: "other", startedAt: 2000 });
+    const entries = orderAgentsAsTree([other, orphan]);
+    // Merged into the normal startedAt order alongside true top-level agents, not appended after.
+    expect(entries.map(e => [e.record.id, e.depth])).toEqual([["orphan", 0], ["other", 0]]);
+  });
+});
+
 describe("FleetList navigation", () => {
   it("does not register a widget when there are no agents", () => {
     const h = harness([]);
     expect(h.render()).toEqual([]);
   });
 
-  it("hides nested child records from the coordinator fleet", () => {
+  it("shows nested child records under their parent, indented", () => {
     const h = harness([
-      makeRecord({ id: "top", description: "top-level" }),
-      makeRecord({ id: "nested", description: "nested-child", parentAgentId: "top" }),
+      makeRecord({ id: "top", description: "top-level", startedAt: 1000 }),
+      makeRecord({ id: "nested", description: "nested-child", parentAgentId: "top", startedAt: 2000 }),
+    ]);
+    const lines = h.render();
+    const parentIdx = lines.findIndex(l => l.includes("top-level"));
+    const childIdx = lines.findIndex(l => l.includes("nested-child"));
+    expect(parentIdx).toBeGreaterThanOrEqual(0);
+    // Directly under its parent, and visually indented under it.
+    expect(childIdx).toBe(parentIdx + 1);
+    expect(plain(lines[childIdx])).toMatch(/^\s+└─/);
+    expect(plain(lines[parentIdx])).not.toMatch(/└─/);
+  });
+
+  it("still excludes a workflow's own agents from the fleet (represented by the run row)", () => {
+    const h = harness([
+      makeRecord({ id: "a1", description: "mine" }),
+      makeRecord({ id: "w1", description: "the workflow's", workflowId: "wf_abc123" }),
     ]);
     const output = h.render().join("\n");
-    expect(output).toContain("top-level");
-    expect(output).not.toContain("nested-child");
+    expect(output).toContain("mine");
+    expect(output).not.toContain("the workflow's");
   });
 
   it("activates on ↓ at an empty prompt, consuming the key", () => {
@@ -439,6 +492,27 @@ describe("FleetList rendering", () => {
     expect(oldIdx).toBeLessThan(newIdx); // earliest sits above the later one
   });
 
+  it("applies the same status/linger visibility rules to nested rows as top-level ones", () => {
+    const top = makeRecord({ id: "top", description: "top-level", startedAt: 1000 });
+    const stalePending = makeRecord({
+      id: "pending-nested", description: "pending-child", parentAgentId: "top",
+      status: "queued", session: undefined,
+    });
+    const longDone = makeRecord({
+      id: "old-nested", description: "old-done-child", parentAgentId: "top",
+      status: "completed", completedAt: Date.now() - 60_000,
+    });
+    const recentlyDone = makeRecord({
+      id: "recent-nested", description: "recent-done-child", parentAgentId: "top",
+      status: "completed", completedAt: Date.now(),
+    });
+    const output = harness([top, stalePending, longDone, recentlyDone]).render().join("\n");
+    expect(output).toContain("top-level");
+    expect(output).not.toContain("pending-child"); // no session yet
+    expect(output).not.toContain("old-done-child"); // past the linger window
+    expect(output).toContain("recent-done-child"); // still lingering
+  });
+
   it("hides agents that have no session yet (pending)", () => {
     const agents = [
       makeRecord({ id: "live", description: "running one" }),
@@ -509,6 +583,31 @@ describe("FleetList overlay lifecycle", () => {
     // Selection follows a2 ("two") to its new position, not whatever is at idx 2 now.
     expect(h.render().find(l => l.includes("two"))).toContain("●");
     expect(h.render().find(l => l.includes("three"))).toContain("○");
+  });
+
+  it("opens the same conversation viewer for a selected nested row, wired to its own id", () => {
+    const fakeSession = { subscribe: () => () => {}, messages: [] };
+    const agents = [
+      makeRecord({ id: "top", description: "top-level", session: fakeSession as any, startedAt: 1000 }),
+      makeRecord({
+        id: "nested", description: "nested-child", parentAgentId: "top",
+        session: fakeSession as any, startedAt: 2000,
+      }),
+    ];
+    const h = harness(agents);
+    h.press(DOWN);  // activate (main)
+    h.press(DOWN);  // → top
+    h.press(DOWN);  // → nested (row directly under its parent)
+    h.press(ENTER); // open the nested agent's conversation viewer
+
+    expect(h.overlayOpened()).toBe(true);
+    const viewer = h.overlayComponent();
+    expect(viewer).toBeDefined();
+    viewer!.handleInput("\r");                      // Enter → open composer
+    for (const ch of "keep going") viewer!.handleInput(ch);
+    viewer!.handleInput("\r");                       // Enter → send
+
+    expect(h.manager.steer).toHaveBeenCalledWith("nested", "keep going");
   });
 
   it("wires the viewer's steer composer to manager.steer with the agent id", () => {

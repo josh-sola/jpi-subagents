@@ -1,8 +1,9 @@
 /**
  * fleet-list.ts — Claude Code-style "FleetView" list rendered below the editor.
  *
- * Shows `main` + each running/queued subagent as a navigable list. Pressing ↓ (or
- * ←) at an empty prompt activates the list; ↑/↓ move the selection (filled ● marker),
+ * Shows `main` + each running/queued subagent, with nested children indented
+ * under their parent, as a navigable list. Pressing ↓ (or ←) at an empty
+ * prompt activates the list; ↑/↓ move the selection (filled ● marker),
  * Enter opens the selected agent's live conversation overlay, Esc returns to the prompt.
  * A viewer stays open when its agent finishes; finished agents linger briefly in the list.
  *
@@ -13,7 +14,7 @@
 
 import { Editor, isKeyRelease, Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { hasAgentBadge, renderAgentName } from "../agent-color.js";
-import { type AgentManager, isTopLevelAgent } from "../agent-manager.js";
+import type { AgentManager } from "../agent-manager.js";
 import type { AgentRecord, ViewerMarkdownMode } from "../types.js";
 import { getLifetimeCost, getLifetimeTotal } from "../usage.js";
 import { type AgentActivity, formatCost, type Theme } from "./agent-widget.js";
@@ -65,9 +66,50 @@ export interface FleetWorkflow {
 }
 
 type MainEntry = { kind: "main" };
-type AgentEntry = { kind: "agent"; record: AgentRecord };
+/** `depth` is the row's visual nesting level: 0 for top-level and orphaned agents, 1+ for a shown descendant. */
+type AgentEntry = { kind: "agent"; record: AgentRecord; depth: number };
 type WorkflowEntry = { kind: "workflow"; workflow: FleetWorkflow };
 type FleetEntry = MainEntry | WorkflowEntry | AgentEntry;
+
+/** One row of `orderAgentsAsTree`'s output. */
+export interface AgentTreeEntry {
+  record: AgentRecord;
+  depth: number;
+}
+
+/**
+ * Depth-first order: each top-level agent is followed immediately by its
+ * visible descendants (each level sorted by `startedAt`), so a tree reads as
+ * one column instead of a shuffle. `records` must already be the visibility-
+ * filtered set — a record whose parent isn't in it (already lingered out, or
+ * owned by something the fleet doesn't show) surfaces as an unindented
+ * top-level row rather than being dropped.
+ */
+export function orderAgentsAsTree(records: readonly AgentRecord[]): AgentTreeEntry[] {
+  const visibleIds = new Set(records.map(r => r.id));
+  const childrenByParent = new Map<string, AgentRecord[]>();
+  const roots: AgentRecord[] = [];
+  for (const record of records) {
+    const parentId = record.parentAgentId;
+    if (parentId !== undefined && visibleIds.has(parentId)) {
+      const siblings = childrenByParent.get(parentId);
+      if (siblings) siblings.push(record);
+      else childrenByParent.set(parentId, [record]);
+    } else {
+      roots.push(record);
+    }
+  }
+  roots.sort((a, b) => a.startedAt - b.startedAt);
+  for (const siblings of childrenByParent.values()) siblings.sort((a, b) => a.startedAt - b.startedAt);
+
+  const entries: AgentTreeEntry[] = [];
+  const visit = (record: AgentRecord, depth: number) => {
+    entries.push({ record, depth });
+    for (const child of childrenByParent.get(record.id) ?? []) visit(child, depth + 1);
+  };
+  for (const record of roots) visit(record, 0);
+  return entries;
+}
 
 /** `11s` — integer seconds, no decimal/suffix (matches Claude Code, unlike formatMs). */
 export function formatFleetElapsed(ms: number): string {
@@ -236,22 +278,23 @@ export class FleetList {
   // ---- Roster ----
 
   /**
-   * Agents shown in the list, ordered earliest-launched first so the ones you
-   * started sooner sit at the top. Every row is openable (has a session), so Enter
-   * never dead-ends. Included: running/queued, plus the agent currently being
-   * viewed, plus recently-finished ones (they linger briefly before dropping out).
-   * Pending agents with no session yet are hidden until they start.
-   * (`listAgents()` is newest-first, so we re-sort.)
+   * Agents shown in the list, as a depth-first tree: each agent immediately
+   * followed by its visible nested children (see `orderAgentsAsTree`). Every
+   * row is openable (has a session), so Enter never dead-ends. Included:
+   * running/queued, plus the agent currently being viewed, plus
+   * recently-finished ones (they linger briefly before dropping out). Pending
+   * agents with no session yet are hidden until they start. Workflow-owned
+   * agents are excluded — the workflow row represents them.
    */
-  private agentRecords(): AgentRecord[] {
+  private agentRecords(): AgentTreeEntry[] {
     const now = Date.now();
-    return this.manager.listAgents()
-      .filter(a => isTopLevelAgent(a) && a.session && (
+    const visible = this.manager.listAgents()
+      .filter(a => a.workflowId === undefined && a.session && (
         a.status === "running" || a.status === "queued"
         || a.id === this.viewingAgentId
         || (a.completedAt != null && now - a.completedAt < FINISHED_LINGER_MS)
-      ))
-      .sort((a, b) => a.startedAt - b.startedAt);
+      ));
+    return orderAgentsAsTree(visible);
   }
 
   /**
@@ -292,7 +335,7 @@ export class FleetList {
     return [
       { kind: "main" },
       ...this.workflows().map(workflow => ({ kind: "workflow" as const, workflow })),
-      ...this.agentRecords().map(record => ({ kind: "agent" as const, record })),
+      ...this.agentRecords().map(({ record, depth }) => ({ kind: "agent" as const, record, depth })),
     ];
   }
 
@@ -486,7 +529,7 @@ export class FleetList {
       lines.push(
         row.kind === "workflow" ?
           this.renderWorkflowRow(a + 1, sel, row.workflow, width, theme)
-        : this.renderAgentRow(a + 1, sel, row.record, width, theme),
+        : this.renderAgentRow(a + 1, sel, row.record, width, theme, row.depth),
       );
     }
     if (hiddenBelow > 0) lines.push(rightAlign("", theme.fg("dim", `↓ ${hiddenBelow} more`), width));
@@ -521,7 +564,14 @@ export class FleetList {
     return rightAlign(left, selected ? theme.fg("text", stats) : theme.fg("dim", stats), width);
   }
 
-  private renderAgentRow(rosterIndex: number, sel: number, record: AgentRecord, width: number, theme: Theme): string {
+  private renderAgentRow(
+    rosterIndex: number,
+    sel: number,
+    record: AgentRecord,
+    width: number,
+    theme: Theme,
+    depth = 0,
+  ): string {
     // The selected row renders in the theme's primary text color so it reads as
     // one selection (#230). A configured badge survives — Claude Code's FleetView
     // keeps the agent color on the selected row too and only bolds it — which also
@@ -531,7 +581,8 @@ export class FleetList {
       ? { fallbackColor: "text", bold: hasAgentBadge(record.type) }
       : { fallbackColor: "muted" });
     const description = selected ? theme.fg("text", record.description) : record.description;
-    const left = `  ${this.bullet(rosterIndex, sel, theme)} ${name}  ${description}`;
+    const prefix = depth > 0 ? `${"  ".repeat(depth)}${theme.fg("dim", "└─")} ` : "";
+    const left = `  ${prefix}${this.bullet(rosterIndex, sel, theme)} ${name}  ${description}`;
     // The record, not the activity tracker — see the note in AgentWidget's
     // running line: only the record carries a nested child's spend, and only it
     // outlives the agent.
