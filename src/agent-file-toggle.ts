@@ -258,7 +258,6 @@ export function serializeAgentFile(cfg: AgentConfig): string {
   if (cfg.runInBackground !== undefined) fmFields.push(`run_in_background: ${cfg.runInBackground}`);
   if (cfg.outputTranscript === false) fmFields.push("output_transcript: false");
   if (cfg.isolated) fmFields.push("isolated: true");
-  if (cfg.memory) fmFields.push(`memory: ${cfg.memory}`);
   if (cfg.isolation) fmFields.push(`isolation: ${cfg.isolation}`);
 
   return `---\n${fmFields.join("\n")}\n---\n\n${cfg.systemPrompt}\n`;

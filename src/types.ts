@@ -14,9 +14,6 @@ export type SubagentType = string;
 /** Names of the three embedded default agents. */
 export const DEFAULT_AGENT_NAMES = ["general-purpose", "Explore", "Plan"] as const;
 
-/** Memory scope for persistent agent memory. */
-export type MemoryScope = "user";
-
 /**
  * Isolation mode for agent execution.
  *
@@ -73,8 +70,6 @@ export interface AgentConfig {
   runInBackground?: boolean;
   /** Default for spawn: no extension tools. undefined = caller decides. */
   isolated?: boolean;
-  /** Persistent memory scope — agents with memory get a persistent directory and MEMORY.md */
-  memory?: MemoryScope;
   /**
    * Isolation mode — "worktree" runs the agent in a temporary git worktree,
    * "off" refuses one even when the caller asks (frontmatter outranks params).

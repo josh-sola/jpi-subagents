@@ -8,7 +8,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { BUILTIN_TOOL_NAMES } from "./agent-types.js";
-import type { AgentConfig, IsolationMode, MemoryScope, ThinkingLevel } from "./types.js";
+import type { AgentConfig, IsolationMode, ThinkingLevel } from "./types.js";
 
 /**
  * The one thing a declared `name:` may not contain, matching Claude Code
@@ -127,7 +127,6 @@ function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "pro
       inheritContext: fm.inherit_context != null ? fm.inherit_context === true : undefined,
       runInBackground: fm.run_in_background != null ? fm.run_in_background === true : undefined,
       isolated: fm.isolated != null ? fm.isolated === true : undefined,
-      memory: parseMemory(fm.memory),
       isolation: parseIsolation(fm.isolation),
       enabled: fm.enabled !== false,  // default true; explicitly false disables
       source,
@@ -280,17 +279,6 @@ function parseToolsField(val: unknown): { builtinToolNames: string[]; extSelecto
  */
 function csvListOptional(val: unknown): string[] | undefined {
   return parseCsvField(val);
-}
-
-/**
- * Parse a memory scope field.
- * omitted → undefined; "user"/"project"/"local" → "user" — project and local
- * memory no longer exist, so both silently collapse into the surviving scope
- * rather than being rejected.
- */
-function parseMemory(val: unknown): MemoryScope | undefined {
-  if (val === "user" || val === "project" || val === "local") return "user";
-  return undefined;
 }
 
 /**

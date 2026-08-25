@@ -215,7 +215,7 @@ interface SpawnOptions {
   /**
    * Working directory for the agent (absolute path). Default: parent session
    * cwd. The agent's tools operate here, but .pi config (extensions, skills,
-   * settings, memory) still loads from the parent session's project — the
+   * settings) still loads from the parent session's project — the
    * target directory's `.pi` extensions never execute. With isolation:
    * "worktree", the worktree is created FROM this directory and the result
    * branch lands in that repo.
@@ -749,7 +749,7 @@ export class AgentManager {
       // which, with a custom cwd, was created from that target). Config stays
       // with the parent project when a caller-supplied cwd is in play; it must
       // stay undefined otherwise so plain worktree runs keep resolving config
-      // (incl. relative extension paths and memory) inside the worktree copy.
+      // (incl. relative extension paths) inside the worktree copy.
       cwd: worktreeCwd ?? customCwd,
       // Set iff a worktree was created (see above) — names the directory the
       // copy came from, so the prompt can tell the agent not to work there.

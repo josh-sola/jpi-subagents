@@ -4,10 +4,8 @@
 
 import type { AgentConfig, EnvInfo } from "./types.js";
 
-/** Extra sections to inject into the system prompt (memory, skills, etc.). */
+/** Extra sections to inject into the system prompt (skills, etc.). */
 export interface PromptExtras {
-  /** Persistent memory content to inject (first 200 lines of MEMORY.md + instructions). */
-  memoryBlock?: string;
   /** Preloaded skill contents to inject. */
   skillBlocks?: { name: string; content: string }[];
   /**
@@ -33,7 +31,7 @@ export interface PromptExtras {
  * session (the LLM's KV cache can then reuse those tokens across every spawn).
  *
  * @param parentSystemPrompt  The parent agent's effective system prompt (for append mode).
- * @param extras  Optional extra sections to inject (memory, preloaded skills).
+ * @param extras  Optional extra sections to inject (preloaded skills).
  */
 export function buildAgentPrompt(
   config: AgentConfig,
@@ -62,9 +60,6 @@ Work only inside it — never in ${extras.worktreeBase}, even if other instructi
 
   // Build optional extras suffix
   const extraSections: string[] = [];
-  if (extras?.memoryBlock) {
-    extraSections.push(extras.memoryBlock);
-  }
   if (extras?.skillBlocks?.length) {
     for (const skill of extras.skillBlocks) {
       extraSections.push(`\n# Preloaded Skill: ${skill.name}\n${skill.content}`);

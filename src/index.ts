@@ -2772,8 +2772,7 @@ disallowed_tools: <comma-separated tool names to block, even if otherwise availa
 inherit_context: <true to fork parent conversation into agent so it sees chat history. Default: false>
 run_in_background: <pin this agent to background (true) or foreground (false). Omit to follow the backgroundByDefault setting, which is background>
 output_transcript: <false to write no transcript file or path for this agent. Independent of persist_session. Default: true>
-isolated: <true for no extension/MCP tools, only built-in tools. Default: false>
-memory: <"user" (global), "project" (per-project), or "local" (gitignored per-project) for persistent memory. Omit for none>${
+isolated: <true for no extension/MCP tools, only built-in tools. Default: false>${
       // Offering the field on a project that turned worktrees off would bake a
       // request that is refused at spawn time into a file that outlives the
       // session — the #231 pathology (models fill the fields they are shown)
@@ -2794,7 +2793,7 @@ Guidelines for choosing settings:
 - Use prompt_mode: replace for fully custom agents with their own personality/instructions
 - Set inherit_context: true if the agent needs to know what was discussed in the parent conversation
 - Set isolated: true if the agent should NOT have access to MCP servers or other extensions
-- Set output_transcript: false to skip writing this agent's transcript; this alone doesn't keep the run off disk (persist_session, isolation: worktree commits, and memory still write) — set those too if that's the goal
+- Set output_transcript: false to skip writing this agent's transcript; this alone doesn't keep the run off disk (persist_session and isolation: worktree commits still write) — set those too if that's the goal
 - Only include frontmatter fields that differ from defaults — omit fields where the default is fine
 
 Write the file using the write tool. Only write the file, nothing else.`;
