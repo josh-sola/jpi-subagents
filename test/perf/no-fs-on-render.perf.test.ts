@@ -34,8 +34,13 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 const { AgentWidget } = await import("../../src/ui/agent-widget.js");
+const { initTheme } = await import("@earendil-works/pi-coding-agent");
 const { ConversationViewer } = await import("../../src/ui/conversation-viewer.js");
 const { makeFleet, makeSession, mountViewer, mountWidget } = await import("../helpers/perf-fixtures.js");
+
+// The enriched path reuses pi's own chat components, which read colors off
+// pi's global theme singleton — real only once initTheme() has run.
+initTheme();
 
 describe("a rendered frame touches no filesystem", () => {
   it("AgentWidget.render", () => {

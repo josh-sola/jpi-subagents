@@ -429,7 +429,9 @@ export class FleetList {
       },
       {
         overlay: true,
-        overlayOptions: { anchor: "center", width: "90%", maxHeight: `${VIEWPORT_HEIGHT_PCT}%` },
+        // Full-screen: the view should read as a swap to the agent's
+        // conversation, not a floating box over the fleet list.
+        overlayOptions: { anchor: "top-left", width: "100%", maxHeight: `${VIEWPORT_HEIGHT_PCT}%` },
       },
     ).then(() => this.clearViewer(), () => this.clearViewer());
   }

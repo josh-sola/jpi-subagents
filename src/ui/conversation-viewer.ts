@@ -5,8 +5,19 @@
  * Subscribes to session events for real-time streaming updates.
  */
 
-import { type AgentSession, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
-import { type Component, Input, Markdown, type MarkdownOptions, type MarkdownTheme, matchesKey, type TUI, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import {
+  type AgentSession,
+  AssistantMessageComponent,
+  BashExecutionComponent,
+  BranchSummaryMessageComponent,
+  CompactionSummaryMessageComponent,
+  CustomMessageComponent,
+  getMarkdownTheme,
+  ToolExecutionComponent,
+  type TruncationResult,
+  UserMessageComponent,
+} from "@earendil-works/pi-coding-agent";
+import { type Component, Container, Input, type MarkdownTheme, matchesKey, Spacer, type TUI, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { renderAgentName } from "../agent-color.js";
 import { extractText } from "../context.js";
 import type { AgentRecord, ViewerMarkdownMode } from "../types.js";
@@ -18,13 +29,20 @@ import { createViewerKeys, type ViewerKeybindings, type ViewerKeys } from "./vie
 /** Base lines consumed by chrome: top border + header + header sep + footer sep + footer + bottom border. */
 const CHROME_LINES_BASE = 6;
 const MIN_VIEWPORT = 3;
-/** Height ceiling shared by the overlay's `maxHeight` and the viewer's internal viewport cap. */
-export const VIEWPORT_HEIGHT_PCT = 70;
+/**
+ * Height ceiling shared by the overlay's `maxHeight` and the viewer's internal
+ * viewport cap. 100 makes the overlay a full-screen swap rather than a
+ * floating box — see fleet-list.ts's `openSelected()`.
+ */
+export const VIEWPORT_HEIGHT_PCT = 100;
 
 /**
- * Cap on a single tool result or bash output before the viewer elides the rest.
+ * Cap on a single tool result or bash output before the literal path elides
+ * the rest. (The enriched path has no equivalent cap — pi's own
+ * ToolExecutionComponent previews instead of dumping the whole result; see
+ * `buildEnrichedLines`.)
  *
- * The cap is not cosmetic — it bounds render cost. `buildContentLines()` runs on
+ * The cap is not cosmetic — it bounds render cost. `buildRawLines()` runs on
  * every render *and* on every scroll key (`handleInput` calls it to compute
  * `maxScroll`), so an uncapped 200 KB result costs ~6 ms per keystroke to parse
  * as Markdown, against ~0.5 ms once capped and effectively nothing on a cache
@@ -42,17 +60,6 @@ const MARKDOWN_MODE_LABELS: Record<ViewerMarkdownMode, string> = {
   off: "raw",
   assistant: "md",
   all: "md+",
-};
-
-/**
- * Both options keep the renderer from *rewriting* source that only looks like
- * Markdown: without them `3) a / 7) b / 9) c` comes back renumbered `3. 4. 5.`
- * and backslash escapes are normalized away. Neither is a safe edit to make to
- * a tool's output, and both are cheap to switch off.
- */
-const MARKDOWN_OPTIONS: MarkdownOptions = {
-  preserveOrderedListMarkers: true,
-  preserveBackslashEscapes: true,
 };
 
 /**
@@ -140,12 +147,26 @@ export class ConversationViewer implements Component {
   /** Set by the `m` key. Wins over the setting so `m` works without a persist hook. */
   private markdownModeOverride: ViewerMarkdownMode | undefined;
   /**
-   * One `Markdown` per message, so its own text/width cache does the work. A
-   * fresh instance per render would re-parse the whole transcript on every
-   * keystroke — the component caches, but only across calls to the same object.
+   * Enriched pi chat components for message types that never mutate once
+   * appended (user, bash, custom, compaction, branch summary) — one instance
+   * per message object, built once and reused across renders and scroll keys.
    * Weak so a compacted-away message doesn't pin its render.
    */
-  private readonly markdownCache = new WeakMap<object, { md: Markdown; text: string; failed?: boolean }>();
+  private readonly blockCache = new WeakMap<object, Component>();
+  /**
+   * Assistant blocks additionally track the text they were built from: the
+   * last message keeps mutating in place while its turn streams in, so this
+   * is how a re-render tells "settled" from "grew since last time".
+   */
+  private readonly assistantCache = new WeakMap<object, { component: AssistantMessageComponent; text: string }>();
+  /**
+   * Tool-call boxes, keyed by call id rather than in `blockCache`: one
+   * assistant message can hold several, and the matching result — a later,
+   * separate message — has to reach the same instance to fill it in.
+   */
+  private readonly toolCallComponents = new Map<string, ToolExecutionComponent>();
+  /** Call ids whose result has already been applied, so a re-render doesn't rebuild the box's renderer on every scroll key. */
+  private readonly appliedToolResults = new Set<string>();
 
   constructor(
     private tui: TUI,
@@ -390,48 +411,6 @@ export class ConversationViewer implements Component {
     return dim ? lines.map(l => this.theme.fg("dim", l)) : lines;
   }
 
-  /** Render `text` as Markdown, reusing this message's component instance. */
-  private markdownLines(msg: object, text: string, width: number, dim: boolean): string[] {
-    let entry = this.markdownCache.get(msg);
-    if (!entry) {
-      entry = {
-        md: new Markdown(
-          text,
-          0,
-          0,
-          this.markdownTheme,
-          // Keeps result prose visually receded, the way the raw path's
-          // per-line `fg("dim", …)` did. Fenced code is the exception and is
-          // left alone deliberately: pi's theme highlights it with its own
-          // colors, which this would otherwise flatten.
-          dim ? { color: (t: string) => this.theme.fg("dim", t) } : undefined,
-          MARKDOWN_OPTIONS,
-        ),
-        text,
-      };
-      this.markdownCache.set(msg, entry);
-    } else if (entry.text !== text) {
-      // Streaming: the message object is stable, its text grows.
-      entry.md.setText(text);
-      entry.text = text;
-      entry.failed = false;
-    }
-    if (entry.failed) return this.rawLines(text, width, dim);
-
-    try {
-      return entry.md.render(width);
-    } catch {
-      // The parser is recursive and this is arbitrary tool output: ~54 nested
-      // blockquotes overflow the stack, and no amount of fuzzing proves that is
-      // the only such input. `render()` is on the TUI's critical path, so a
-      // throw here takes the overlay down for content the literal path shows
-      // fine — degrade to that instead, and remember, since the throw would
-      // otherwise repeat on every render and every scroll key.
-      entry.failed = true;
-      return this.rawLines(text, width, dim);
-    }
-  }
-
   /** Steerable only when a steer handler exists and the agent is still active. */
   private canSteer(): boolean {
     return !!this.onSteer && (this.record.status === "running" || this.record.status === "queued");
@@ -495,14 +474,40 @@ export class ConversationViewer implements Component {
 
     const th = this.theme;
     const messages = this.session.messages;
-    const lines: string[] = [];
 
     if (messages.length === 0) {
-      lines.push(th.fg("dim", "(waiting for first message...)"));
-      return lines;
+      return [th.fg("dim", "(waiting for first message...)")];
     }
 
-    const mode = this.markdownMode();
+    let lines: string[];
+    if (this.markdownMode() === "off") {
+      lines = this.buildRawLines(messages, width);
+    } else {
+      try {
+        lines = this.buildEnrichedLines(messages, width);
+      } catch {
+        // pi's own chat components carry no equivalent guard — interactive-mode.js
+        // constructs them the same way — but render() is on our critical path
+        // too, so a parser throw (e.g. pathologically nested Markdown) degrades
+        // to the literal transcript rather than taking the overlay down.
+        lines = this.buildRawLines(messages, width);
+      }
+    }
+
+    // Streaming indicator for running agents
+    if (this.record.status === "running" && this.activity) {
+      const act = describeActivity(this.activity.activeTools, this.activity.responseText);
+      lines.push("");
+      lines.push(truncateToWidth(th.fg("accent", "▍ ") + th.fg("dim", act), width));
+    }
+
+    return lines.map(l => truncateToWidth(l, width));
+  }
+
+  /** Literal fallback for markdown mode `off` — the escape hatch to unformatted source. */
+  private buildRawLines(messages: AgentSession["messages"], width: number): string[] {
+    const th = this.theme;
+    const lines: string[] = [];
     let needsSeparator = false;
     for (const msg of messages) {
       if (msg.role === "user") {
@@ -528,9 +533,7 @@ export class ConversationViewer implements Component {
         lines.push(th.bold("[Assistant]"));
         if (textParts.length > 0) {
           const text = textParts.join("\n").trim();
-          lines.push(...(mode === "off"
-            ? this.rawLines(text, width, false)
-            : this.markdownLines(msg, text, width, false)));
+          lines.push(...this.rawLines(text, width, false));
         }
         for (const name of toolCalls) {
           lines.push(truncateToWidth(th.fg("muted", `  [Tool: ${name}]`), width));
@@ -540,9 +543,7 @@ export class ConversationViewer implements Component {
         if (!text) continue;
         if (needsSeparator) lines.push(th.fg("dim", "───"));
         lines.push(th.fg("dim", "[Result]"));
-        lines.push(...(mode === "all"
-          ? this.markdownLines(msg, text, width, true)
-          : this.rawLines(text, width, true)));
+        lines.push(...this.rawLines(text, width, true));
         if (elided) lines.push(truncateToWidth(th.fg("dim", truncationNote(elided)), width));
       } else if ((msg as any).role === "bashExecution") {
         const bash = msg as any;
@@ -560,14 +561,138 @@ export class ConversationViewer implements Component {
       }
       needsSeparator = true;
     }
+    return lines;
+  }
 
-    // Streaming indicator for running agents
-    if (this.record.status === "running" && this.activity) {
-      const act = describeActivity(this.activity.activeTools, this.activity.responseText);
-      lines.push("");
-      lines.push(truncateToWidth(th.fg("accent", "▍ ") + th.fg("dim", act), width));
+  /**
+   * Enriched transcript — reuses pi's own chat renderers (Markdown, diffs,
+   * tool boxes) so an agent's transcript reads the same as pi's main chat.
+   * Spacing between blocks mirrors pi's own `addMessageToChat`/
+   * `renderSessionItems` (interactive-mode.js): some components pad
+   * themselves, so only user/compaction/branch messages get an external
+   * spacer here.
+   *
+   * Message objects are stable once appended — `session.messages` never
+   * replaces one in place — so each block is built once and cached; only the
+   * actively-streaming assistant message is re-checked, since its text keeps
+   * growing on the same object.
+   *
+   * Tool/bash/custom output starts collapsed to a preview, matching pi's own
+   * default (there is no expand keybinding wired here to un-collapse it).
+   * Compaction and branch summaries are expanded outright — their text is
+   * short, so a collapsed preview would hide everything useful.
+   */
+  private buildEnrichedLines(messages: AgentSession["messages"], width: number): string[] {
+    const container = new Container();
+    const cwd = this.session.sessionManager.getCwd();
+    const transformers = this.session.extensionRunner.getMarkdownTransformers();
+    const isRunning = this.record.status === "running";
+
+    for (const msg of messages) {
+      if (msg.role === "user") {
+        const text = typeof msg.content === "string" ? msg.content : extractText(msg.content);
+        if (!text.trim()) continue;
+        if (container.children.length > 0) container.addChild(new Spacer(1));
+        let component = this.blockCache.get(msg);
+        if (!component) {
+          component = new UserMessageComponent(text, this.markdownTheme, 1, transformers);
+          this.blockCache.set(msg, component);
+        }
+        container.addChild(component);
+      } else if (msg.role === "assistant") {
+        const text = msg.content.filter(c => c.type === "text").map(c => c.text).join("\n");
+        let entry = this.assistantCache.get(msg);
+        if (!entry) {
+          const component = new AssistantMessageComponent(msg, false, this.markdownTheme, undefined, 1, transformers);
+          entry = { component, text };
+          this.assistantCache.set(msg, entry);
+        } else if (entry.text !== text) {
+          entry.component.updateContent(msg, isRunning);
+          entry.text = text;
+        }
+        container.addChild(entry.component);
+
+        for (const content of msg.content) {
+          if (content.type !== "toolCall") continue;
+          let toolComponent = this.toolCallComponents.get(content.id);
+          if (!toolComponent) {
+            toolComponent = new ToolExecutionComponent(
+              content.name,
+              content.id,
+              content.arguments,
+              undefined,
+              this.session.getToolDefinition(content.name),
+              this.tui,
+              cwd,
+            );
+            toolComponent.markExecutionStarted();
+            toolComponent.setArgsComplete();
+            this.toolCallComponents.set(content.id, toolComponent);
+          }
+          // The turn ended without a result (abort/error) — there is no later
+          // toolResult message to pair this call with, so fill it in here
+          // instead. Checked on every pass, not just at construction: the
+          // message mutates in place as the turn streams, so a viewer open
+          // while it is still running builds the box before stopReason is
+          // set — the abort (e.g. the viewer's own stop key) can land after.
+          if (!this.appliedToolResults.has(content.id) && (msg.stopReason === "aborted" || msg.stopReason === "error")) {
+            const errorMessage = msg.stopReason === "aborted" ? "Operation aborted" : msg.errorMessage || "Error";
+            toolComponent.updateResult({ content: [{ type: "text", text: errorMessage }], isError: true });
+            this.appliedToolResults.add(content.id);
+          }
+          container.addChild(toolComponent);
+        }
+      } else if (msg.role === "toolResult") {
+        const toolComponent = this.toolCallComponents.get(msg.toolCallId);
+        if (toolComponent && !this.appliedToolResults.has(msg.toolCallId)) {
+          toolComponent.updateResult(msg);
+          this.appliedToolResults.add(msg.toolCallId);
+        }
+      } else if (msg.role === "bashExecution") {
+        let component = this.blockCache.get(msg);
+        if (!component) {
+          const bash = new BashExecutionComponent(msg.command, this.tui, msg.excludeFromContext);
+          if (msg.output) bash.appendOutput(msg.output);
+          // Only `.truncated` is read by the component's display logic; the rest
+          // of TruncationResult's fields describe a truncation pass we never ran.
+          const truncation = msg.truncated ? ({ truncated: true } as TruncationResult) : undefined;
+          bash.setComplete(msg.exitCode, msg.cancelled, truncation, msg.fullOutputPath);
+          component = bash;
+          this.blockCache.set(msg, component);
+        }
+        container.addChild(component);
+      } else if (msg.role === "custom") {
+        if (!msg.display) continue;
+        let component = this.blockCache.get(msg);
+        if (!component) {
+          const renderer = this.session.extensionRunner.getMessageRenderer(msg.customType);
+          component = new CustomMessageComponent(msg, renderer, this.markdownTheme, 1);
+          this.blockCache.set(msg, component);
+        }
+        container.addChild(component);
+      } else if (msg.role === "compactionSummary") {
+        container.addChild(new Spacer(1));
+        let component = this.blockCache.get(msg);
+        if (!component) {
+          const summary = new CompactionSummaryMessageComponent(msg, this.markdownTheme);
+          summary.setExpanded(true);
+          component = summary;
+          this.blockCache.set(msg, component);
+        }
+        container.addChild(component);
+      } else if (msg.role === "branchSummary") {
+        container.addChild(new Spacer(1));
+        let component = this.blockCache.get(msg);
+        if (!component) {
+          const summary = new BranchSummaryMessageComponent(msg, this.markdownTheme);
+          summary.setExpanded(true);
+          component = summary;
+          this.blockCache.set(msg, component);
+        }
+        container.addChild(component);
+      }
     }
 
-    return lines.map(l => truncateToWidth(l, width));
+    return container.render(width);
   }
 }

@@ -170,12 +170,13 @@ export function makeSession(n: number) {
         role: "assistant",
         content: [
           { type: "text", text: `${ASSISTANT_MARKDOWN}\n(message ${i})` },
-          { type: "toolCall", name: "read" },
+          { type: "toolCall", id: `t${i}`, name: "read", arguments: {} },
         ],
       });
     } else {
       messages.push({
         role: "toolResult",
+        toolCallId: `t${i - 1}`,
         toolName: "read",
         content: [{ type: "text", text: `${TOOL_RESULT}(result ${i})` }],
       });
@@ -186,6 +187,12 @@ export function makeSession(n: number) {
     subscribe: () => () => {},
     dispose: () => {},
     getSessionStats: () => ({ tokens: { input: 0, output: 0, cacheWrite: 0 } }),
+    // The enriched render path reuses pi's own chat renderers, which need
+    // these to build a tool box (cwd, definitions) and pass extension markdown
+    // transformers through — structural stand-ins, same as the rest of this file.
+    sessionManager: { getCwd: () => "/perf/fixture" },
+    extensionRunner: { getMarkdownTransformers: () => [], getMessageRenderer: () => undefined },
+    getToolDefinition: () => undefined,
   } as any;
 }
 

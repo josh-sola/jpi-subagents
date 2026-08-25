@@ -20,9 +20,14 @@
  * A regression that breaks cache identity would leave "warm" looking like
  * "cold" here while every other test stays green.
  */
+import { initTheme } from "@earendil-works/pi-coding-agent";
 import { bench, describe } from "vitest";
 import { ConversationViewer } from "../../src/ui/conversation-viewer.js";
 import { makeSession, mountViewer } from "../helpers/perf-fixtures.js";
+
+// The enriched path reuses pi's own chat components, which read colors off
+// pi's global theme singleton — real only once initTheme() has run.
+initTheme();
 
 const SIZES = [50, 500, 5000];
 

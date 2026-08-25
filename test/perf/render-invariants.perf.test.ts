@@ -14,10 +14,17 @@
  *
  * Every bound here is an upper bound, never an equality: making one of these
  * paths cheaper must not turn a test red.
+ *
+ * The markdown-mode counters below only see the literal ("off") path's own
+ * direct pi-tui usage — pi-coding-agent ships its own nested copy of pi-tui,
+ * so the mock never sees the `Markdown` instances pi's real
+ * AssistantMessageComponent builds internally for the enriched path. Those
+ * paths spy on the component's `updateContent` instead, which is the one
+ * operation that does real reparsing work (see the "markdown path" tests).
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-/** Counters for the pi-tui leaves the viewer wraps its text with. */
+/** Counters for the pi-tui leaves the viewer wraps its text with (literal path only — see header). */
 const counts = { wrap: 0, markdownNew: 0, markdownRender: 0 };
 
 vi.mock("@earendil-works/pi-tui", async (importOriginal) => {
@@ -44,10 +51,15 @@ vi.mock("@earendil-works/pi-tui", async (importOriginal) => {
 
 // After the mock, so the subjects bind the counting versions.
 const { AgentWidget } = await import("../../src/ui/agent-widget.js");
+const { AssistantMessageComponent, initTheme } = await import("@earendil-works/pi-coding-agent");
 const { ConversationViewer } = await import("../../src/ui/conversation-viewer.js");
 const { makeActivity, makeFleet, makeSession, mountViewer, perfTheme, perfTui } = await import(
   "../helpers/perf-fixtures.js"
 );
+
+// The enriched path reuses pi's own chat components, which read colors off
+// pi's global theme singleton — real only once initTheme() has run.
+initTheme();
 
 beforeEach(() => {
   counts.wrap = 0;
@@ -78,28 +90,42 @@ describe("ConversationViewer — cost stays linear in transcript length", () => 
     expect(large / small).toBeLessThanOrEqual(11);
   });
 
+  // The enriched path's leaf isn't a top-level pi-tui call (see header) — it's
+  // pi's AssistantMessageComponent building its Markdown, once per assistant
+  // message, on the frame that first sees each one (priming). Same shape as
+  // the raw-wrap check above: linear in the transcript, not quadratic.
   it("does ~10x the work for 10x the messages (markdown path)", () => {
-    const small = wrapsFor(30, "assistant");
-    const large = wrapsFor(300, "assistant");
+    const updateSpy = vi.spyOn(AssistantMessageComponent.prototype, "updateContent");
+    const buildsFor = (n: number) => {
+      updateSpy.mockClear();
+      mountViewer(ConversationViewer, makeSession(n), undefined, () => "assistant").render(120);
+      return updateSpy.mock.calls.length;
+    };
+
+    const small = buildsFor(30);
+    const large = buildsFor(300);
 
     expect(small).toBeGreaterThan(0);
     expect(large / small).toBeLessThanOrEqual(11);
+    updateSpy.mockRestore();
   });
 
-  // #259's WeakMap is keyed by the message object. If a refactor ever rebuilds
-  // messages, or keys the cache on something that changes per frame, every frame
-  // re-parses the whole transcript as Markdown — a cost this suite measured at
-  // roughly 10x the warm path. Nothing else in the suite would notice.
+  // The cache is a WeakMap keyed by the message object. If a refactor ever
+  // rebuilds messages, or keys the cache on something that changes per frame,
+  // every frame re-parses the whole transcript. Nothing else in the suite
+  // would notice.
   it("re-renders without re-parsing: the markdown cache survives a frame", () => {
+    const updateSpy = vi.spyOn(AssistantMessageComponent.prototype, "updateContent");
     const viewer = mountViewer(ConversationViewer, makeSession(60), undefined, () => "assistant");
     viewer.render(120);
-    const afterFirst = counts.markdownNew;
+    const afterFirst = updateSpy.mock.calls.length;
     expect(afterFirst).toBeGreaterThan(0);
 
     viewer.render(120);
     viewer.render(120);
 
-    expect(counts.markdownNew).toBe(afterFirst);
+    expect(updateSpy.mock.calls.length).toBe(afterFirst);
+    updateSpy.mockRestore();
   });
 });
 
