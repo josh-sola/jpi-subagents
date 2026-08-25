@@ -449,6 +449,41 @@ describe("FleetList vs other focused components (#123)", () => {
     expect(h.press(DOWN)).toBeUndefined(); // must flow through to the selector
   });
 
+  it("does not steal ↓ from a focused selector when an external consumer owns rendering", () => {
+    const h = harness([makeRecord()]);
+    h.fleet.attachConsumer({
+      requestRender: vi.fn(),
+      getFocusedComponent: () => ({ kind: "selector" }),
+    });
+
+    expect(h.press(DOWN)).toBeUndefined();
+  });
+
+  it("deactivates and passes navigation through when consumer focus leaves the editor", () => {
+    const h = harness([makeRecord()]);
+    let focused: unknown = realEditor();
+    h.fleet.attachConsumer({
+      requestRender: vi.fn(),
+      getFocusedComponent: () => focused,
+    });
+
+    expect(h.press(DOWN)).toEqual({ consume: true });
+    expect(h.fleet.renderForConsumer(120, theme).some(l => l.includes("enter view"))).toBe(true);
+
+    focused = { kind: "selector" };
+    expect(h.press(DOWN)).toBeUndefined();
+    expect(h.press(UP)).toBeUndefined();
+    expect(h.press(ENTER)).toBeUndefined();
+    expect(h.fleet.renderForConsumer(120, theme).some(l => l.includes("← for agents"))).toBe(true);
+  });
+
+  it("keeps unknown focus permissive for consumers without the optional accessor", () => {
+    const h = harness([makeRecord()]);
+    h.fleet.attachConsumer({ requestRender: vi.fn() });
+
+    expect(h.press(DOWN)).toEqual({ consume: true });
+  });
+
   it("does not steal navigation keys from a selector opened while the list was active", () => {
     const h = harness([makeRecord()]);
     focusInHarness(h, realEditor());

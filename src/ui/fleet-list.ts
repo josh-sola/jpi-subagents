@@ -13,9 +13,10 @@
  * to jpi-status so it can draw the rows below its own status footer instead), the
  * widget is torn down and every place that would otherwise register or refresh it
  * asks the consumer to re-render instead. ALL key handling goes through
- * `onTerminalInput` — which fires before the focused editor and can `consume` keys —
- * gated on `getEditorText() === ""` so normal typing is untouched; that is unaffected
- * by whether a consumer is attached.
+ * `onTerminalInput`, which fires before the focused component and can consume its
+ * keys. The focus gate therefore reads from the external consumer when attached,
+ * or from the fallback widget's TUI, so dialogs receive their own navigation keys.
+ * Unknown focus stays permissive so normal FleetView activation still works.
  */
 
 import { Editor, isKeyRelease, Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
@@ -38,7 +39,15 @@ const FINISHED_LINGER_MS = 4000;
 /** Minimal surface a fleet render consumer (e.g. jpi-status's footer) needs. */
 export interface FleetConsumer {
   requestRender(): void;
+  /** Optional for compatibility with a consumer updated independently. */
+  getFocusedComponent?(): unknown;
 }
+
+/** Narrow view of Pi's TUI focus API, with the legacy/private fallback. */
+type FocusAwareTui = {
+  getFocusedComponent?(): unknown;
+  focusedComponent?: unknown;
+};
 
 /** Minimal UI surface the FleetView needs from `ctx.ui` (structural subset). */
 export type FleetUICtx = {
@@ -196,9 +205,11 @@ export class FleetList {
   /**
    * Hand rendering to an external consumer (jpi-status's footer) instead of the
    * `belowEditor` widget. Tears the widget down immediately, and `update()` calls
-   * `consumer.requestRender()` from then on. Last attach wins; the returned
-   * detach only clears the consumer if it is still the current one, and the next
-   * `update()` restores the widget fallback.
+   * `consumer.requestRender()` from then on. The consumer may also expose its
+   * TUI's focused component so the global input listener does not intercept a
+   * dialog's keys after the local widget TUI is released. Last attach wins; the
+   * returned detach only clears the consumer if it is still the current one, and
+   * the next `update()` restores the widget fallback.
    */
   attachConsumer(consumer: FleetConsumer): () => void {
     this.consumer = consumer;
@@ -342,10 +353,11 @@ export class FleetList {
     // test below, which would otherwise read the dialog holding the keyboard as
     // "the user left the list" and reset the selection out from under it.
     if (this.viewerClose) return undefined;
-    // Input listeners fire BEFORE the focused component, and dialogs
+    // Global input listeners fire BEFORE the focused component, and dialogs
     // (ctx.ui.select/confirm/input, pi's own menus) swap the prompt editor out
-    // while getEditorText() still reads the detached — empty — editor. So when
-    // anything but the editor owns the keyboard, stay out of its keys (#123).
+    // while getEditorText() still reads the detached — empty — editor. Focus may
+    // come from the external footer consumer or the fallback widget TUI; either
+    // way, stay out of another component's keys (#123).
     if (!this.editorHasFocus()) {
       if (this.active) this.deactivate();
       return undefined;
@@ -388,12 +400,19 @@ export class FleetList {
    * True when pi's prompt editor owns the keyboard. pi's editor is an `Editor`
    * subclass (CustomEditor) while every dialog/selector is not, and the loader
    * aliases pi-tui to pi's own copy, so `instanceof` is a reliable identity
-   * check. `focusedComponent` is TUI-private (no public accessor), hence the
-   * best-effort peek: unknowable focus (no tui seen yet, nothing focused)
-   * counts as the editor so activation keeps working.
+   * check.
+   *
+   * An attached consumer owns the live TUI after the fallback widget is removed,
+   * so its focus accessor must win. Otherwise use Pi's public
+   * `getFocusedComponent()` on the widget TUI, with `focusedComponent` retained
+   * only as a fallback for older/test TUI shapes. Unknowable focus counts as the
+   * editor so activation still works before either render path has supplied one.
    */
   private editorHasFocus(): boolean {
-    const focused = (this.tui as { focusedComponent?: unknown } | undefined)?.focusedComponent;
+    const tui = this.tui as FocusAwareTui | undefined;
+    const focused = this.consumer?.getFocusedComponent?.()
+      ?? tui?.getFocusedComponent?.()
+      ?? tui?.focusedComponent;
     return focused == null || focused instanceof Editor;
   }
 
