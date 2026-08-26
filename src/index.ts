@@ -1272,7 +1272,11 @@ export default async function (pi: ExtensionAPI) {
 
     return available.map((name) => {
       const cfg = getAgentConfig(name);
-      const modelSuffix = cfg?.model ? ` (${getModelLabelFromConfig(cfg.model)})` : "";
+      const modelSuffix = cfg?.model
+        ? ` (${getModelLabelFromConfig(cfg.model)})`
+        : cfg?.modelDefault
+        ? ` (default: ${getModelLabelFromConfig(cfg.modelDefault)})`
+        : "";
       const toolsSuffix = ` (Tools: ${formatToolsSuffix(cfg)})`;
       return `- ${name}: ${cfg?.description ?? name}${modelSuffix}${toolsSuffix}`;
     }).join("\n");

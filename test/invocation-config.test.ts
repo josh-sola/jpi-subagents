@@ -137,6 +137,36 @@ describe("resolveAgentInvocationConfig", () => {
   });
 });
 
+describe("resolveAgentInvocationConfig — model_default", () => {
+  it("falls back to model_default when neither a pin nor a caller param names a model", () => {
+    const resolved = resolveAgentInvocationConfig(makeConfig({ modelDefault: "provider/default-model" }), {});
+
+    expect(resolved.modelInput).toBe("provider/default-model");
+    expect(resolved.modelFromParams).toBe(false);
+  });
+
+  it("lets a caller's model param beat model_default", () => {
+    const resolved = resolveAgentInvocationConfig(
+      makeConfig({ modelDefault: "provider/default-model" }),
+      { model: "provider/param-model" },
+    );
+
+    expect(resolved.modelInput).toBe("provider/param-model");
+    expect(resolved.modelFromParams).toBe(true);
+  });
+
+  it("lets a pin beat both a caller param and model_default", () => {
+    const resolved = resolveAgentInvocationConfig(
+      makeConfig({ model: "provider/config-model", modelDefault: "provider/default-model" }),
+      { model: "provider/param-model" },
+    );
+
+    expect(resolved.modelInput).toBe("provider/config-model");
+    expect(resolved.modelFromParams).toBe(false);
+    expect(resolved.overridden).toEqual({ thinking: undefined, model: "provider/param-model" });
+  });
+});
+
 describe("resolveJoinMode", () => {
   it("returns the global default for background agents", () => {
     expect(resolveJoinMode("smart", true)).toBe("smart");

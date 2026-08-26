@@ -114,6 +114,7 @@ You are a security auditor.`);
     expect(agent.description).toBe("Security Auditor");
     expect(agent.builtinToolNames).toEqual(["read", "grep", "find"]);
     expect(agent.model).toBe("anthropic/claude-opus-4-6");
+    expect(agent.modelDefault).toBeUndefined();
     expect(agent.thinking).toBe("high");
     expect(agent.maxTurns).toBe(30);
     expect(agent.persistSession).toBe(true);
@@ -125,6 +126,20 @@ You are a security auditor.`);
     expect(agent.runInBackground).toBe(true);
     expect(agent.isolated).toBe(true);
     expect(agent.systemPrompt).toBe("You are a security auditor.");
+  });
+
+  it("parses model_default separately from a model pin", () => {
+    writeAgent("soft-default", `---
+description: Soft default
+model_default: anthropic/claude-haiku-4-5
+---
+
+Prompt.`);
+
+    const result = loadCustomAgents(tmpDir);
+    const agent = result.get("soft-default")!;
+    expect(agent.model).toBeUndefined();
+    expect(agent.modelDefault).toBe("anthropic/claude-haiku-4-5");
   });
 
   it("uses sensible defaults when frontmatter is empty", () => {
@@ -144,6 +159,7 @@ Just a prompt.`);
     expect(agent.extensions).toBe(true); // inherit all
     expect(agent.skills).toBe(true); // inherit all
     expect(agent.model).toBeUndefined();
+    expect(agent.modelDefault).toBeUndefined();
     expect(agent.thinking).toBeUndefined();
     expect(agent.maxTurns).toBeUndefined();
     expect(agent.persistSession).toBeUndefined();

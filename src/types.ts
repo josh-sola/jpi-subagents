@@ -49,6 +49,8 @@ export interface AgentConfig {
   /** true = inherit all, string[] = only listed, false = none */
   skills: true | string[] | false;
   model?: string;
+  /** Soft default: only used when neither `model` nor the caller's spawn-time `model` names one. */
+  modelDefault?: string;
   thinking?: ThinkingLevel;
   maxTurns?: number;
   /** Persist this subagent as a normal pi session instead of keeping it in memory only. */

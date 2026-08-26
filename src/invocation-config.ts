@@ -132,7 +132,9 @@ export function resolveAgentInvocationConfig(
     : undefined;
 
   return {
-    modelInput: agentConfig?.model ?? params.model,
+    // model_default sits below the caller's own choice — a soft default only
+    // fills a gap the caller left, unlike `model`, which overrules them.
+    modelInput: agentConfig?.model ?? params.model ?? agentConfig?.modelDefault,
     modelFromParams: agentConfig?.model == null && params.model != null,
     thinking: (agentConfig?.thinking ?? params.thinking) as ThinkingLevel | undefined,
     maxTurns: agentConfig?.maxTurns ?? params.max_turns,
