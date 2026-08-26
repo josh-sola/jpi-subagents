@@ -30,7 +30,7 @@
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.49",
-    "jpi-base": "github:josh-sola/jpi-base#semver:^0.5.0"
+    "jpi-base": "github:josh-sola/jpi-base#semver:^0.7.0"
   },
   "scripts": {
     "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc",
