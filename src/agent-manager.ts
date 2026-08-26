@@ -216,19 +216,21 @@ interface SpawnOptions {
    * cwd. The agent's tools operate here, but .pi config (extensions, skills,
    * settings) still loads from the parent session's project — the
    * target directory's `.pi` extensions never execute. With isolation:
-   * "worktree", the worktree is created FROM this directory and the result
-   * branch lands in that repo.
+   * "worktree", the worktree is created FROM this directory, and a kept
+   * worktree (the agent left changes) is left behind in that repo.
    */
   cwd?: string;
   /**
-   * Last chance to look at an isolated agent's worktree, awaited immediately
-   * before it is committed to a branch and removed.
+   * Last chance to look at an isolated agent's worktree before cleanup
+   * decides whether to keep it or remove it, awaited immediately.
    *
-   * Exists because that removal happens inside the settle path, before
+   * Exists because a clean worktree is removed inside the settle path, before
    * `spawnAndWait` resolves: by the time a caller has the finished record, the
-   * directory the child actually wrote in is gone. Anything that must inspect
-   * or verify that tree has to run here or it silently inspects the main tree
-   * instead.
+   * directory the child actually wrote in may already be gone. Anything that
+   * must inspect or verify that tree has to run here or it silently inspects
+   * the main tree instead. (A dirty worktree survives cleanup on its own now,
+   * but this hook still runs before that decision is made, for every worktree
+   * agent.)
    *
    * Fires only on the normal settle path, and only when a worktree was created.
    * Not on the error path and not on the stop-during-copy guard: those are
@@ -711,7 +713,7 @@ export class AgentManager {
       // definition unchanged) worktree instead.
       if (record.status !== "running") {
         releaseSlot();
-        record.worktreeResult = await cleanupWorktree(pi, baseCwd, wt, options.description);
+        record.worktreeResult = await cleanupWorktree(pi, baseCwd, wt);
         this.drainQueue();
         return;
       }
@@ -857,14 +859,15 @@ export class AgentManager {
               await options.onBeforeWorktreeCleanup(record.worktree.path);
             } catch { /* ignore — never block cleanup */ }
           }
-          const wtResult = await cleanupWorktree(pi, baseCwd, record.worktree, options.description);
+          const wtResult = await cleanupWorktree(pi, baseCwd, record.worktree);
           record.worktreeResult = wtResult;
-          if (wtResult.hasChanges && wtResult.branch) {
-            // With a caller-supplied cwd the branch lives in THAT repo, not the
-            // parent session's — say so, or the orchestrator merges in the wrong repo.
-            const repoNote = customCwd !== undefined ? ` in \`${baseCwd}\`` : "";
+          if (wtResult.hasChanges && wtResult.path) {
+            // With a caller-supplied cwd the worktree was created from THAT
+            // repo, not the parent session's — say so, or the orchestrator
+            // looks for it in the wrong place.
+            const repoNote = customCwd !== undefined ? ` (created from \`${baseCwd}\`)` : "";
             record.result = (record.result ?? "") +
-              `\n\n---\nChanges saved to branch \`${wtResult.branch}\`${repoNote}. Merge with: \`git merge ${wtResult.branch}\`${customCwd !== undefined ? ` (run in \`${baseCwd}\`)` : ""}`;
+              `\n\n---\nUncommitted changes left in the worktree at \`${wtResult.path}\`${repoNote}. Review and merge them manually — the worktree is kept as-is, nothing was committed.`;
           }
         }
 
@@ -892,7 +895,7 @@ export class AgentManager {
         // Best-effort worktree cleanup on error
         if (record.worktree) {
           try {
-            const wtResult = await cleanupWorktree(pi, baseCwd, record.worktree, options.description);
+            const wtResult = await cleanupWorktree(pi, baseCwd, record.worktree);
             record.worktreeResult = wtResult;
           } catch { /* ignore cleanup errors */ }
         }

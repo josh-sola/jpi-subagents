@@ -846,7 +846,7 @@ describe("AgentManager — isolation: worktree fails loud, no silent fallback", 
     // the record stopped while the repo is still being copied.
     const { createWorktree, cleanupWorktree } = await import("../src/worktree.js");
     let releaseCopy!: () => void;
-    const wt = { path: "/wt/copy", branch: "pi-agent-x", baseSha: "abc", workPath: "/wt/copy" };
+    const wt = { path: "/wt/copy", baseSha: "abc", workPath: "/wt/copy" };
     vi.mocked(createWorktree).mockImplementationOnce(
       () => new Promise(resolve => { releaseCopy = () => resolve(wt); }),
     );
@@ -864,17 +864,18 @@ describe("AgentManager — isolation: worktree fails loud, no silent fallback", 
     await manager.awaitStartup(id);
 
     expect(runAgent).not.toHaveBeenCalled();
-    expect(cleanupWorktree).toHaveBeenCalledWith(mockPi, "/tmp", wt, "stopped");
+    expect(cleanupWorktree).toHaveBeenCalledWith(mockPi, "/tmp", wt);
     expect(manager.getRecord(id)!.status).toBe("stopped");
   });
 });
 
-// The worktree is committed to a branch and deleted inside the settle path, so
-// a caller holding the finished record can no longer see what the child wrote.
-// `onBeforeWorktreeCleanup` is the one window where it still exists.
+// A clean worktree is removed inside the settle path, so a caller holding the
+// finished record can no longer see what the child wrote there. A dirty one
+// now survives on its own, but `onBeforeWorktreeCleanup` still fires before
+// cleanup decides which — the one guaranteed window before that decision.
 describe("AgentManager — onBeforeWorktreeCleanup", () => {
   let manager: AgentManager;
-  const wt = { path: "/wt/copy", branch: "pi-agent-x", baseSha: "abc", workPath: "/wt/copy" };
+  const wt = { path: "/wt/copy", baseSha: "abc", workPath: "/wt/copy" };
 
   /** Records call order across the hook and the (mocked) cleanup. */
   async function trace() {
@@ -913,7 +914,7 @@ describe("AgentManager — onBeforeWorktreeCleanup", () => {
     });
 
     expect(seen).toEqual(["/wt/copy"]);
-    // Order is the whole point: after cleanup the path is a branch, not a tree.
+    // Order is the whole point: cleanup decides keep-vs-remove after the hook runs.
     expect(order).toEqual(["hook", "cleanup"]);
   });
 
@@ -993,6 +994,55 @@ describe("AgentManager — onBeforeWorktreeCleanup", () => {
     });
 
     expect(order).toEqual([]);
+  });
+});
+
+// The manager appends the kept-worktree note to the agent's own result text —
+// the path, not a branch, since nothing is committed on the agent's behalf.
+describe("AgentManager — kept-worktree result note", () => {
+  let manager: AgentManager;
+
+  afterEach(async () => {
+    manager?.dispose();
+    const { cleanupWorktree } = await import("../src/worktree.js");
+    vi.mocked(cleanupWorktree).mockReset();
+    vi.mocked(cleanupWorktree).mockImplementation(async () => ({ hasChanges: false }));
+  });
+
+  it("names the kept worktree's path, not a branch, when the agent left changes", async () => {
+    const { createWorktree, cleanupWorktree } = await import("../src/worktree.js");
+    vi.mocked(createWorktree).mockResolvedValueOnce({ path: "/wt/copy", baseSha: "abc", workPath: "/wt/copy" });
+    vi.mocked(cleanupWorktree).mockResolvedValueOnce({ hasChanges: true, path: "/wt/copy" });
+    vi.mocked(runAgent).mockResolvedValueOnce({
+      responseText: "child output", session: mockSession(), aborted: false, steered: false,
+    });
+
+    manager = new AgentManager();
+    const { record } = await manager.spawnAndWait(mockPi, mockCtx, "X", "test", {
+      description: "test",
+      isolation: "worktree",
+    });
+
+    expect(record.result).toContain("child output");
+    expect(record.result).toContain("/wt/copy");
+    expect(record.result).not.toMatch(/branch/i);
+  });
+
+  it("adds no note when the worktree was clean and removed", async () => {
+    const { createWorktree, cleanupWorktree } = await import("../src/worktree.js");
+    vi.mocked(createWorktree).mockResolvedValueOnce({ path: "/wt/copy", baseSha: "abc", workPath: "/wt/copy" });
+    vi.mocked(cleanupWorktree).mockResolvedValueOnce({ hasChanges: false });
+    vi.mocked(runAgent).mockResolvedValueOnce({
+      responseText: "child output", session: mockSession(), aborted: false, steered: false,
+    });
+
+    manager = new AgentManager();
+    const { record } = await manager.spawnAndWait(mockPi, mockCtx, "X", "test", {
+      description: "test",
+      isolation: "worktree",
+    });
+
+    expect(record.result).toBe("child output");
   });
 });
 
@@ -1093,7 +1143,7 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
   it("cwd + isolation: worktree — worktree created FROM cwd, session runs at the copy's workPath, cleanup targets cwd's repo", async () => {
     const { createWorktree, cleanupWorktree } = await import("../src/worktree.js");
     vi.mocked(createWorktree).mockResolvedValueOnce({
-      path: "/wt/copy", branch: "pi-agent-x", baseSha: "abc", workPath: "/wt/copy/packages/api",
+      path: "/wt/copy", baseSha: "abc", workPath: "/wt/copy/packages/api",
     });
     resolvedRun();
 
@@ -1115,7 +1165,7 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
       mockCtx, "general-purpose", "test",
       expect.objectContaining({ cwd: "/wt/copy/packages/api", configCwd: "/tmp", worktreeBase: "/" }),
     );
-    expect(cleanupWorktree).toHaveBeenCalledWith(mockPi, "/", expect.anything(), "test");
+    expect(cleanupWorktree).toHaveBeenCalledWith(mockPi, "/", expect.anything());
   });
 
   it("plain worktree (no cwd) keeps the historical root working dir even when workPath differs", async () => {
@@ -1124,7 +1174,7 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
     // copy's root — moving it would also move .pi config discovery.
     const { createWorktree } = await import("../src/worktree.js");
     vi.mocked(createWorktree).mockResolvedValueOnce({
-      path: "/wt/copy", branch: "pi-agent-x", baseSha: "abc", workPath: "/wt/copy/sub/dir",
+      path: "/wt/copy", baseSha: "abc", workPath: "/wt/copy/sub/dir",
     });
     vi.mocked(runAgent).mockClear();
     resolvedRun();
@@ -1892,7 +1942,7 @@ describe("AgentManager — waitForAll", () => {
     let releaseCopy!: () => void;
     vi.mocked(createWorktree).mockImplementationOnce(
       () => new Promise(resolve => {
-        releaseCopy = () => resolve({ path: "/wt/copy", branch: "b", baseSha: "abc", workPath: "/wt/copy" });
+        releaseCopy = () => resolve({ path: "/wt/copy", baseSha: "abc", workPath: "/wt/copy" });
       }),
     );
     vi.mocked(runAgent).mockClear();
@@ -1932,7 +1982,7 @@ describe("AgentManager — dispose prunes worktree repos", () => {
     // dispose. A manager disposed without one just skips it.
     const { createWorktree, pruneWorktrees } = await import("../src/worktree.js");
     vi.mocked(createWorktree).mockResolvedValueOnce({
-      path: "/wt/copy", branch: "b", baseSha: "abc", workPath: "/wt/copy",
+      path: "/wt/copy", baseSha: "abc", workPath: "/wt/copy",
     });
     vi.mocked(pruneWorktrees).mockClear().mockResolvedValue(undefined);
     resolvedRun();

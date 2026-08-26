@@ -58,6 +58,7 @@ describe("subagents settings (jpi.kdl)", () => {
       widgetMode: "background",
       outputTranscript: true,
       worktreeIsolation: true,
+      worktreeCleanupPeriodDays: 30,
       maxSubagentDepth: 2,
       fallbackSubagent: "general-purpose",
       reportUsage: false,
@@ -76,6 +77,13 @@ describe("subagents settings (jpi.kdl)", () => {
     expect(loaded.value.maxConcurrent).toBe(4);
     expect(loaded.value.scopeModels).toBe(true);
     expect(loaded.value.graceTurns).toBe(5);
+  });
+
+  it("round-trips worktreeCleanupPeriodDays alongside worktreeIsolation", async () => {
+    await newConfig().save({ worktreeIsolation: false, worktreeCleanupPeriodDays: 7 });
+    const loaded = await loadSubagentsSettings(newConfig());
+    expect(loaded.value.worktreeIsolation).toBe(false);
+    expect(loaded.value.worktreeCleanupPeriodDays).toBe(7);
   });
 
   it("round-trips fallbackSubagent's #false arm alongside a named agent", async () => {
@@ -131,6 +139,7 @@ function makeAppliers(): SettingsAppliers {
     setWidgetMode: vi.fn(),
     setOutputTranscript: vi.fn(),
     setWorktreeIsolation: vi.fn(),
+    setWorktreeCleanupPeriodDays: vi.fn(),
     setMaxSubagentDepth: vi.fn(),
     setFallbackSubagent: vi.fn(),
     setReportUsage: vi.fn(),
@@ -159,6 +168,7 @@ function fullSettings(overrides: Partial<SubagentsSettings> = {}): SubagentsSett
     widgetMode: "background",
     outputTranscript: true,
     worktreeIsolation: true,
+    worktreeCleanupPeriodDays: 30,
     maxSubagentDepth: 2,
     fallbackSubagent: "general-purpose",
     reportUsage: false,
@@ -187,6 +197,7 @@ describe("applySettings", () => {
     expect(appliers.setToolDescriptionMode).toHaveBeenCalledWith("full");
     expect(appliers.setWidgetMode).toHaveBeenCalledWith("background");
     expect(appliers.setViewerMarkdown).toHaveBeenCalledWith("assistant");
+    expect(appliers.setWorktreeCleanupPeriodDays).toHaveBeenCalledWith(30);
   });
 
   // 0 is a real value here (unlimited), so `if (s.x)` truthiness would silently

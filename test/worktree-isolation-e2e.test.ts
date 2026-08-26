@@ -9,8 +9,8 @@
  * agent-startup-error) mock ../src/worktree.js entirely and assert only the gate
  * and the fail-loud throw. So the chain the feature actually promises was never
  * pinned end to end: spawn → the child's cwd IS the copy → its edits stay out of
- * the main checkout → cleanup commits them to a branch the result names → the
- * copy is gone. Every link was tested; the chain was not.
+ * the main checkout → cleanup leaves the dirty copy on disk and names its path
+ * in the result. Every link was tested; the chain was not.
  *
  * Deliberately faux, not live: a live model may decline to spawn at all, which
  * would look like a pass. Each run pins `live: false` rather than trusting the
@@ -119,7 +119,7 @@ describe("worktree isolation e2e (real git, real pi-mono, faux model)", () => {
     }
   });
 
-  it("runs the child in the copy and lands its changes on a branch, not the main checkout", async () => {
+  it("runs the child in the copy and leaves its dirty changes there, uncommitted", async () => {
     const repo = initGitRepo();
     repos.push(repo);
 
@@ -137,18 +137,19 @@ describe("worktree isolation e2e (real git, real pi-mono, faux model)", () => {
     const result = agentResultText(run.parentSession);
     expect(result).toContain(CHILD_MARKER);
 
-    // The result names a branch and the command to merge it — the only artifact,
-    // since the worktree directory does not survive.
-    const branch = /Changes saved to branch `(pi-agent-[^`]+)`/.exec(result)?.[1];
-    expect(branch).toBeTruthy();
-    expect(result).toContain(`git merge ${branch}`);
+    // The result names the kept worktree's path — the only artifact, since
+    // nothing was committed and no branch was made.
+    const wtPath = /Uncommitted changes left in the worktree at `([^`]+)`/.exec(result)?.[1];
+    expect(wtPath).toBeTruthy();
+    expect(git(repo, "branch", "--list", "pi-agent-*")).toBe("");
 
-    // That branch exists in the MAIN repo and carries the child's file.
-    expect(git(repo, "branch", "--list", branch!)).toContain(branch!);
-    expect(git(repo, "ls-tree", "--name-only", branch!)).toContain(MARKER_FILE);
+    // The copy itself survives, with the child's file still sitting in it,
+    // uncommitted.
+    expect(existsSync(join(wtPath!, MARKER_FILE))).toBe(true);
+    expect(git(wtPath!, "status", "--porcelain")).toContain(MARKER_FILE);
+    expect(git(repo, "worktree", "list").split("\n")).toHaveLength(2);
 
-    // And the copy is gone: `git worktree list` is down to the main checkout.
-    expect(git(repo, "worktree", "list").split("\n")).toHaveLength(1);
+    try { git(repo, "worktree", "remove", "--force", wtPath!); } catch { /* ignore */ }
   });
 
   it("downgrades to the main checkout when the project set worktreeIsolation: false", async () => {
@@ -196,7 +197,7 @@ describe("worktree isolation e2e (real git, real pi-mono, faux model)", () => {
 
       // Silent by design — no per-result note, which is why the tool description
       // drops the isolation bullet alongside the parameter (see index.ts).
-      expect(result).not.toContain("Changes saved to branch");
+      expect(result).not.toContain("Uncommitted changes left in the worktree");
     } finally {
       if (prevAgentDir == null) delete process.env.PI_CODING_AGENT_DIR;
       else process.env.PI_CODING_AGENT_DIR = prevAgentDir;

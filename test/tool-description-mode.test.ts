@@ -254,9 +254,9 @@ describe("toolDescriptionMode", () => {
   // half: `isolationParam` dropped the field while both descriptions kept
   // telling the model to pass it. Nothing rejects the undeclared key (TypeBox
   // sets no additionalProperties: false) and, by design, nothing notes the
-  // downgrade on the result — so the model had every reason to report a
-  // `pi-agent-*` branch that was never created. Schema and prose have to move
-  // together, which is why both are asserted here.
+  // downgrade on the result — so the model had every reason to go on reporting
+  // a worktree that was never created. Schema and prose have to move together,
+  // which is why both are asserted here.
   describe("worktreeIsolation gates the isolation parameter and its prose", () => {
     const props = (tools: Map<string, any>) =>
       Object.keys(tools.get("Agent").parameters?.properties ?? {});

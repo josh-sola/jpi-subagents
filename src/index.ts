@@ -57,7 +57,7 @@ import {
 import { FleetList, type FleetUICtx } from "./ui/fleet-list.js";
 import { selectItem } from "./ui/select-item.js";
 import { getLifetimeCost, getLifetimeTotal, getSessionContextPercent, type LifetimeUsage, PendingUsagePool, toReportedUsage } from "./usage.js";
-import { isWorktreeIsolationEnabled, setWorktreeIsolationEnabled } from "./worktree.js";
+import { getWorktreeCleanupPeriodDays, isWorktreeIsolationEnabled, setWorktreeCleanupPeriodDays, setWorktreeIsolationEnabled } from "./worktree.js";
 import { escapeXml } from "./xml.js";
 
 // ---- Shared helpers ----
@@ -1325,6 +1325,7 @@ export default async function (pi: ExtensionAPI) {
     setWidgetMode: setWidgetMode,
     setOutputTranscript: setOutputTranscriptDefault,
     setWorktreeIsolation: setWorktreeIsolationEnabled,
+    setWorktreeCleanupPeriodDays,
     setMaxSubagentDepth: setMaxSubagentDepth,
     setFallbackSubagent: setFallbackSubagent,
     setReportUsage,
@@ -1341,14 +1342,13 @@ export default async function (pi: ExtensionAPI) {
   // would teach the model to pass a parameter that isn't declared — accepted
   // (TypeBox sets no `additionalProperties: false`) and then silently dropped
   // by the resolver. With no per-result note by design, the model would have
-  // every reason to go on reporting a `pi-agent-*` branch that was never
-  // created.
+  // every reason to go on reporting a worktree path that was never created.
   const isolationGuideline = isWorktreeIsolationEnabled()
-    ? `\n- Use isolation: "worktree" to give the agent its own git worktree (safe parallel file modifications); leave it unset, or pass "off", for none. The worktree is removed when the agent finishes; if it made changes, they are committed to a branch and the branch is named in the result.`
+    ? `\n- Use isolation: "worktree" to give the agent its own git worktree (safe parallel file modifications); leave it unset, or pass "off", for none. The worktree is removed when the agent made no changes; if it made changes, the worktree is kept on disk, uncommitted, and its path is named in the result.`
     : "";
 
   const isolationCompactGuideline = isWorktreeIsolationEnabled()
-    ? `\n- isolation: "worktree" gives the agent its own git worktree (removed on completion); changes land on a branch named in the result.`
+    ? `\n- isolation: "worktree" gives the agent its own git worktree, removed if unchanged; if changed, kept uncommitted and its path named in the result.`
     : "";
 
   // Compact Agent tool description (#91, `toolDescriptionMode: "compact"`) —
@@ -2676,7 +2676,7 @@ Guidelines for choosing settings:
 - Use prompt_mode: replace for fully custom agents with their own personality/instructions
 - Set inherit_context: true if the agent needs to know what was discussed in the parent conversation
 - Set isolated: true if the agent should NOT have access to MCP servers or other extensions
-- Set output_transcript: false to skip writing this agent's transcript; this alone doesn't keep the run off disk (persist_session and isolation: worktree commits still write) — set those too if that's the goal
+- Set output_transcript: false to skip writing this agent's transcript; this alone doesn't keep the run off disk (persist_session, and a kept isolation: worktree, still write) — set those too if that's the goal
 - Only include frontmatter fields that differ from defaults — omit fields where the default is fine
 
 Write the file using the write tool. Only write the file, nothing else.`;
@@ -2809,6 +2809,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
       widgetMode: getWidgetMode(),
       outputTranscript: getOutputTranscriptDefault(),
       worktreeIsolation: isWorktreeIsolationEnabled(),
+      worktreeCleanupPeriodDays: getWorktreeCleanupPeriodDays(),
       maxSubagentDepth: getMaxSubagentDepth(),
       // `false` is the KDL spelling of the NO_FALLBACK sentinel — the reverse
       // of applySettings' mapping. `?? "general-purpose"` only matters before

@@ -81,4 +81,10 @@ describe("documented defaults (README:441)", () => {
     const { isScopeModelsEnabled } = await import("../src/model-scope.js");
     expect(isScopeModelsEnabled()).toBe(false);
   });
+
+  it("worktree isolation is on, with a 30-day cleanup period, by default", async () => {
+    const { isWorktreeIsolationEnabled, getWorktreeCleanupPeriodDays } = await import("../src/worktree.js");
+    expect(isWorktreeIsolationEnabled()).toBe(true);
+    expect(getWorktreeCleanupPeriodDays()).toBe(30);
+  });
 });

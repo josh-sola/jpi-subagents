@@ -100,6 +100,14 @@ const subagentsSchema = j.node({
       .default(true)
       .describe("allow isolation: worktree to create a git worktree"),
     /**
+     * How many days an unlocked, clean, reachable `pi-agent-*` worktree may
+     * sit in tmpdir before the TTL sweep (session teardown) reclaims it.
+     */
+    worktreeCleanupPeriodDays: j
+      .number()
+      .default(30)
+      .describe("days an idle, clean worktree survives before the sweep removes it"),
+    /**
      * Hard ceiling on nested subagent delegation, counted from the main
      * session: main = 0, its subagents = 1, their children = 2.
      */
@@ -178,6 +186,7 @@ export interface SettingsAppliers {
   setWidgetMode: (mode: WidgetMode) => void;
   setOutputTranscript: (b: boolean) => void;
   setWorktreeIsolation: (b: boolean) => void;
+  setWorktreeCleanupPeriodDays: (n: number) => void;
   setMaxSubagentDepth: (n: number) => void;
   setFallbackSubagent: (v: string) => void;
   setReportUsage: (b: boolean) => void;
@@ -216,6 +225,7 @@ export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers):
   appliers.setWidgetMode(s.widgetMode);
   appliers.setOutputTranscript(s.outputTranscript);
   appliers.setWorktreeIsolation(s.worktreeIsolation);
+  appliers.setWorktreeCleanupPeriodDays(s.worktreeCleanupPeriodDays);
   appliers.setReportUsage(s.reportUsage);
   appliers.setShowCost(s.showCost);
   appliers.setShowModel(s.showModel);
