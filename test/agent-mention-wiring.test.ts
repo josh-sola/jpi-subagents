@@ -395,7 +395,7 @@ describe("resolving which agent a handle means", () => {
     expect(await send(lifecycle, "@explore reach into a child")).toEqual({ action: "handled" });
     expect(child.steer).not.toHaveBeenCalled();
     expect(runAgent).toHaveBeenCalledWith(
-      expect.anything(), "Explore", "reach into a child", expect.anything(),
+      expect.anything(), "explore", "reach into a child", expect.anything(),
     );
   });
 
@@ -418,7 +418,7 @@ describe("resolving which agent a handle means", () => {
     await send(lifecycle, "@explore start over");
 
     expect(resumeAgent).not.toHaveBeenCalled();
-    expect(runAgent).toHaveBeenCalledWith(expect.anything(), "Explore", "start over", expect.anything());
+    expect(runAgent).toHaveBeenCalledWith(expect.anything(), "explore", "start over", expect.anything());
 
   });
 });
@@ -437,7 +437,7 @@ describe("mentioning an agent that has never run", () => {
     expect(result).toEqual({ action: "handled" });
     expect(runAgent).toHaveBeenCalledWith(
       expect.anything(),
-      "Explore",
+      "explore",
       "find every retry marker",
       expect.anything(),
     );
@@ -588,7 +588,7 @@ describe("letting a clone of the conversation start the agent", () => {
 
     expect(runMentionClone).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: "Plan",
+        type: "plan",
         message: "sketch the migration",
         agentTool: tools.get("Agent"),
       }),
@@ -951,7 +951,7 @@ describe("@agent-<type> — Claude Code's manual spelling", () => {
 
     expect(result).toEqual({ action: "handled" });
     expect(vi.mocked(runAgent)).toHaveBeenCalledWith(
-      expect.anything(), "Explore", "find the flaky test", expect.anything(),
+      expect.anything(), "explore", "find the flaky test", expect.anything(),
     );
   });
 
@@ -1043,7 +1043,7 @@ describe("resuming an evicted agent by name", () => {
     expect(result).toEqual({ action: "handled" });
     expect(vi.mocked(runAgent)).toHaveBeenCalledWith(
       expect.anything(),
-      "Explore",
+      "explore",
       "anything else?",
       expect.objectContaining({ resumeSessionFile: sessionPath() }),
     );
@@ -1213,7 +1213,7 @@ describe("resuming an evicted agent by name", () => {
     await flush();
 
     expect(vi.mocked(runAgent)).toHaveBeenLastCalledWith(
-      expect.anything(), "Explore", "try again",
+      expect.anything(), "explore", "try again",
       expect.objectContaining({ resumeSessionFile: sessionPath() }),
     );
   });
@@ -1301,7 +1301,7 @@ describe("resuming an evicted agent by name", () => {
     await flush();
 
     expect(vi.mocked(runAgent)).toHaveBeenCalledWith(
-      expect.anything(), "Explore", "start over",
+      expect.anything(), "explore", "start over",
       expect.not.objectContaining({ resumeSessionFile: expect.anything() }),
     );
     expect(uiCtx.ui.notify).toHaveBeenCalledWith("Started @explore", "info");

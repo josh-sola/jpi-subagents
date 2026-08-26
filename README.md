@@ -114,7 +114,7 @@ Subagents are addressable. Every agent has a typeable handle — the agent type,
   @auth-audit     send message · Explore · running · audit the auth flow
   @explore-2      send message · running · find flaky tests
   @code-review    resume · code-review · check the diff
-  @plan           start agent · Software architect agent for designing implementation plans.
+  @plan           start agent · Read-only software architect for implementation plans, sequencing, dependencies, and trade-offs.
   index.ts        src/index.ts                        ← pi's own file rows, still there
   index.d.ts      dist/index.d.ts
 ```
@@ -205,11 +205,11 @@ Group completions render each agent as a separate block. The LLM receives struct
 
 | Type | Tools | Model | Prompt Mode | Description |
 |------|-------|-------|-------------|-------------|
-| `general-purpose` | all 7 | inherit | `append` (parent twin) | Inherits the parent's full system prompt — same rules, CLAUDE.md, project conventions |
-| `Explore` | read, bash, grep, find, ls | haiku (falls back to inherit) | `replace` (standalone) | Fast codebase exploration (read-only) |
-| `Plan` | read, bash, grep, find, ls | inherit | `replace` (standalone) | Software architect for implementation planning (read-only) |
+| `general-purpose` | all 7 | `model_default`: gpt-5.6-terra (falls back to inherit) | `append` (parent twin) | General-purpose agent for complex research, code search, analysis, and scoped implementation |
+| `explore` | read, bash, grep, find, ls | `model_default`: gpt-5.6-luna (falls back to inherit) | `replace` (standalone) | Fast read-only specialist for locating files, tracing code, and answering codebase questions |
+| `plan` | read, bash, grep, find, ls | `model_default`: gpt-5.6-sol (falls back to inherit) | `replace` (standalone) | Read-only software architect for implementation plans, sequencing, dependencies, and trade-offs |
 
-The `general-purpose` agent is a **parent twin** — it receives the parent's entire system prompt plus a sub-agent context bridge, so it follows the same rules the parent does. Explore and Plan use standalone prompts tailored to their read-only roles.
+The `general-purpose` agent is a **parent twin** — it receives the parent's entire system prompt plus a sub-agent context bridge, so it follows the same rules the parent does. `explore` and `plan` use standalone prompts tailored to their read-only roles. All three pin `inherit_context: false`, so every run starts with a fresh context rather than a fork of the parent conversation. Each also sets `model_default` to a `gpt-5.6` model; a caller's `model` parameter, or the agent's own `model` pin, still wins, and on a setup without that model configured the spawn silently falls back to the parent's model.
 
 Default agents can be **ejected** (`/agents` → select agent → Eject) to export them as `.md` files for customization, **overridden** by creating a `.md` file with the same name (e.g. `.agents/agents/general-purpose.md`), or **disabled** with `enabled: false` frontmatter.
 
@@ -507,7 +507,7 @@ Missing fields fall back to the hardcoded defaults (max concurrency `10`, max fo
 
 **Strict agent files** (`strict-agent-files`, default `#false`): when on, an unreadable or unparseable [agent file](#custom-agents) aborts extension load at startup and names the file, instead of being skipped with a warning — so a checked-in `.agents/agents/` can't silently fall through to a same-named agent from another location. Startup only: the mid-session reload that runs on each `Agent` call keeps warning either way, since a bad edit shouldn't kill a session on an unrelated spawn. Also settable from `/agents → Settings → Strict agent files`.
 
-**Disable defaults** (`disable-default-agents`, default `#false`): when on, the three built-in agents (general-purpose, Explore, Plan) are not registered — only your project/global custom agents are advertised and spawnable. User-defined agents are unaffected, including ones that override a default by name. The Agent tool's type list updates on the next pi session (the tool schema is registered at startup).
+**Disable defaults** (`disable-default-agents`, default `#false`): when on, the three built-in agents (general-purpose, explore, plan) are not registered — only your project/global custom agents are advertised and spawnable. User-defined agents are unaffected, including ones that override a default by name. The Agent tool's type list updates on the next pi session (the tool schema is registered at startup).
 
 **Agent mentions** (`agent-mentions`, default `"model"`): whether [`@handle message`](#agent-mentions) at the prompt addresses that subagent instead of the main model — messaging, resuming or starting it — and whether `@` offers agents alongside pi's file completion. `"model"` and `"direct"` differ only in [who starts an agent that isn't running](#starting-a-new-agent): an off-screen clone of this conversation, via a `<system-reminder>` and a real `Agent` call, or this extension, immediately and with no model call. Messaging and resuming are direct in both. `"off"` gates all three actions plus the suggestion list, so `@` means only "attach a file" again and every `@…` prompt reaches the main model verbatim. Toggle via `/agents → Settings → Agent mentions`; applied live. The booleans this setting used to take are still read — `#true` as `"model"`, `#false` as `"off"`.
 
@@ -783,7 +783,7 @@ src/
   types.ts            # Type definitions (AgentConfig, AgentRecord, etc.)
 
   # Agent registry
-  default-agents.ts   # Embedded default agent configs (general-purpose, Explore, Plan)
+  default-agents.ts   # Embedded default agent configs (general-purpose, explore, plan)
   custom-agents.ts    # Load user-defined agents from .agents/agents/ and the global agent dir
   agent-types.ts      # Unified agent registry (defaults + user), tool name resolution
   agent-file-toggle.ts # Locate/edit an agent's .md: enabled: toggle, eject to frontmatter

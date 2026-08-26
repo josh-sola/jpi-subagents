@@ -198,11 +198,20 @@ function resolveReply(
 /**
  * The common single-spawn flow as a responder. Routes by inspecting the calling
  * session's own context:
- *   - PARENT  (its tool set includes `Agent`):
+ *   - PARENT  (its system prompt was never built by buildAgentPrompt):
  *       · `parentInitial` until an `Agent` tool result is in history (the spawn),
  *       · then `parentFinal` (the answer after the child reports back).
- *   - SUBAGENT (no `Agent` tool): `subagent`.
+ *   - SUBAGENT (anything else): `subagent`.
  * Each route may be a value or a `(ctx) => value` function.
+ *
+ * Tool presence can't tell parent from child: a default agent with
+ * `allowed_subagents` set (general-purpose) gets its own scoped nested tool
+ * literally named "Agent" (see NESTED_TOOL_NAMES in nested-tools.ts), so a
+ * delegating child looks identical to the root session by tool name alone.
+ * Every agent buildAgentPrompt ever produces — replace or append mode —
+ * carries an `<active_agent>` tag; the true root session's prompt comes from
+ * pi-coding-agent directly and never does, so its absence is the reliable
+ * signal instead.
  */
 export function routeBySession(routes: {
   parentInitial: FauxReply | ((ctx: Context) => FauxReply);
@@ -210,7 +219,7 @@ export function routeBySession(routes: {
   subagent: FauxReply | ((ctx: Context) => FauxReply);
 }): FauxResponder {
   return (context) => {
-    const isParent = (context.tools ?? []).some((t) => t.name === "Agent");
+    const isParent = !context.systemPrompt?.includes("<active_agent");
     if (!isParent) return resolveReply(routes.subagent, context);
     const spawned = context.messages.some(
       (m) => m.role === "toolResult" && (m as { toolName?: string }).toolName === "Agent",

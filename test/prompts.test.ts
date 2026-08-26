@@ -34,23 +34,23 @@ describe("buildAgentPrompt", () => {
   });
 
   it("handles non-git repos", () => {
-    const config = getDefaultConfig("Explore");
+    const config = getDefaultConfig("explore");
     const prompt = buildAgentPrompt(config, "/workspace", envNoGit);
     expect(prompt).toContain("Not a git repository");
     expect(prompt).not.toContain("Branch:");
   });
 
-  it("Explore prompt is read-only", () => {
-    const config = getDefaultConfig("Explore");
+  it("explore prompt is read-only", () => {
+    const config = getDefaultConfig("explore");
     const prompt = buildAgentPrompt(config, "/workspace", env);
-    expect(prompt).toContain("READ-ONLY");
-    expect(prompt).toContain("file search specialist");
+    expect(prompt).toContain("Read-only mode");
+    expect(prompt).toContain("file-search specialist");
   });
 
-  it("Plan prompt is read-only", () => {
-    const config = getDefaultConfig("Plan");
+  it("plan prompt is read-only", () => {
+    const config = getDefaultConfig("plan");
     const prompt = buildAgentPrompt(config, "/workspace", env);
-    expect(prompt).toContain("READ-ONLY");
+    expect(prompt).toContain("Read-only mode");
     expect(prompt).toContain("software architect");
   });
 
@@ -61,16 +61,17 @@ describe("buildAgentPrompt", () => {
     expect(prompt).toContain("parent coding agent with full powers");
     expect(prompt).toContain("<sub_agent_context>");
     expect(prompt).not.toContain("<inherited_system_prompt>");
-    expect(prompt).not.toContain("READ-ONLY");
-    // Empty systemPrompt means no <agent_instructions> section
-    expect(prompt).not.toContain("<agent_instructions>");
+    expect(prompt).not.toContain("Read-only mode");
+    // general-purpose has a non-empty systemPrompt, so it gets an <agent_instructions> section
+    expect(prompt).toContain("<agent_instructions>");
+    expect(prompt).toContain("general-purpose subagent for Pi");
   });
 
   it("general-purpose without parent prompt falls back to generic base", () => {
     const config = getDefaultConfig("general-purpose");
     const prompt = buildAgentPrompt(config, "/workspace", env);
     expect(prompt).toContain("general-purpose coding agent");
-    expect(prompt).not.toContain("READ-ONLY");
+    expect(prompt).not.toContain("Read-only mode");
   });
 
   it("append mode with parent prompt includes parent + custom instructions", () => {

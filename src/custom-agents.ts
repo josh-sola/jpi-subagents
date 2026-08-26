@@ -19,9 +19,7 @@ import type { AgentConfig, IsolationMode, ThinkingLevel } from "./types.js";
  * letters and hyphens", but that is guidance — the only stated load failure is
  * the colon, so `name: Code Reviewer` must work here too. (The stricter
  * letters/digits/underscore/hyphen regex in Claude Code applies to the Agent
- * tool's spawn-time `name` parameter, which is a different field.) Mixed case
- * has to be allowed regardless: the built-in types `Explore` and `Plan` use it,
- * and a file must be able to override one.
+ * tool's spawn-time `name` parameter, which is a different field.)
  */
 const RESERVED_IN_TYPE = ":";
 
@@ -32,7 +30,7 @@ const RESERVED_IN_TYPE = ":";
  *   2. Global:    $PI_CODING_AGENT_DIR/agents/*.md (default: ~/.pi/agent/agents/*.md)
  *
  * Workspace agents override global ones with the same name.
- * Any name is allowed — names matching defaults (e.g. "Explore") override them.
+ * Any name is allowed — names matching defaults (e.g. "explore") override them.
  *
  * An agent's type comes from its frontmatter `name:`, falling back to the
  * filename — Claude Code's rule, where "the filename doesn't have to match".

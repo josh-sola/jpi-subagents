@@ -84,7 +84,12 @@ describe.skipIf(LIVE)("maxConcurrentForeground e2e (real pi agent loop)", () => 
         live: false, // scripted on purpose: a real model may not emit both calls
         isolateGlobals: false,
         respond: async (context: Context) => {
-          const isParent = (context.tools ?? []).some(t => t.name === "Agent");
+          // Tool presence can't tell parent from child once general-purpose's
+          // default `allowed_subagents` gives it its own scoped tool also named
+          // "Agent" (see routeBySession's doc comment in print-mode-runner.ts).
+          // Every spawned agent's prompt carries an `<active_agent>` tag; the
+          // root session's never does.
+          const isParent = !context.systemPrompt?.includes("<active_agent");
           if (isParent) {
             const alreadySpawned = context.messages.some(
               m => m.role === "toolResult" && (m as { toolName?: string }).toolName === "Agent",

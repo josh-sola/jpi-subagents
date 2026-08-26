@@ -99,8 +99,8 @@ describe("toolDescriptionMode", () => {
     const desc: string = tools.get("Agent").description;
     expect(desc).toContain("## Usage notes");
     expect(desc).toContain("## Writing the prompt");
-    // Full agent descriptions are embedded (a late Explore sentence survives).
-    expect(desc).toContain("very thorough");
+    // Full agent descriptions are embedded.
+    expect(desc).toContain("answering codebase questions");
   });
 
   it("compact mode swaps in the short description with one-line type list", async () => {
@@ -111,8 +111,7 @@ describe("toolDescriptionMode", () => {
     expect(desc).not.toContain("## Writing the prompt");
     // Type list keeps every agent but only the first sentence of each description.
     expect(desc).toContain("- general-purpose:");
-    expect(desc).toContain("- Explore: Fast read-only search agent for locating code. (Tools:");
-    expect(desc).not.toContain("very thorough");
+    expect(desc).toContain("- explore: Fast read-only specialist for locating files, tracing code, and answering codebase questions. (Tools:");
     // The point of the feature: materially smaller than the full version.
     expect(desc.length).toBeLessThan(1600);
   });
