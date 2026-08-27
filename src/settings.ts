@@ -140,6 +140,15 @@ const subagentsSchema = j.node({
       .union(j.literal("off"), j.literal("assistant"), j.literal("all"))
       .default("assistant")
       .describe("how much of the conversation viewer's transcript renders as Markdown"),
+    /**
+     * Key that converts every currently-blocking top-level `Agent` call into a
+     * background one. An unparseable value falls back to this same default
+     * rather than disabling the shortcut.
+     */
+    backgroundShortcut: j
+      .string()
+      .default("ctrl+b")
+      .describe("key that moves the current blocking Agent call(s) to the background"),
   },
 });
 
@@ -193,6 +202,7 @@ export interface SettingsAppliers {
   setShowCost: (b: boolean) => void;
   setShowModel: (b: boolean) => void;
   setViewerMarkdown: (mode: ViewerMarkdownMode) => void;
+  setBackgroundShortcut: (keyId: string) => void;
 }
 
 /** Emit callback — a subset of `pi.events.emit` to keep helpers testable. */
@@ -230,6 +240,7 @@ export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers):
   appliers.setShowCost(s.showCost);
   appliers.setShowModel(s.showModel);
   appliers.setViewerMarkdown(s.viewerMarkdown);
+  appliers.setBackgroundShortcut(s.backgroundShortcut);
 }
 
 /**

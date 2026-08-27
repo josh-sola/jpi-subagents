@@ -217,6 +217,13 @@ export interface AgentRecord {
   /** Cleanup function for the output file stream subscription. */
   outputCleanup?: () => void;
   /**
+   * Removes whatever parent-abort-signal listener is currently wired to kill
+   * this agent on Esc. `detachBlocking` (ctrl+b) must call this before it lets
+   * the caller's wait end, or a later Esc would still kill an agent the user
+   * just moved to the background.
+   */
+  detachAbortListener?: () => void;
+  /**
    * Lifetime usage breakdown, accumulated via `message_end` events. Survives
    * compaction. Total = input + output + cacheWrite (cacheRead deliberately
    * excluded — see issue #38). Initialized to zeros at spawn.

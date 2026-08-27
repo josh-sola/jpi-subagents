@@ -65,6 +65,7 @@ describe("subagents settings (jpi.kdl)", () => {
       showCost: false,
       showModel: false,
       viewerMarkdown: "assistant",
+      backgroundShortcut: "ctrl+b",
     } satisfies SubagentsSettings);
     expect(existsSync(kdlPath())).toBe(true);
   });
@@ -84,6 +85,12 @@ describe("subagents settings (jpi.kdl)", () => {
     const loaded = await loadSubagentsSettings(newConfig());
     expect(loaded.value.worktreeIsolation).toBe(false);
     expect(loaded.value.worktreeCleanupPeriodDays).toBe(7);
+  });
+
+  it("round-trips a custom backgroundShortcut", async () => {
+    await newConfig().save({ backgroundShortcut: "ctrl+g" });
+    const loaded = await loadSubagentsSettings(newConfig());
+    expect(loaded.value.backgroundShortcut).toBe("ctrl+g");
   });
 
   it("round-trips fallbackSubagent's #false arm alongside a named agent", async () => {
@@ -146,6 +153,7 @@ function makeAppliers(): SettingsAppliers {
     setShowCost: vi.fn(),
     setShowModel: vi.fn(),
     setViewerMarkdown: vi.fn(),
+    setBackgroundShortcut: vi.fn(),
   };
 }
 
@@ -175,6 +183,7 @@ function fullSettings(overrides: Partial<SubagentsSettings> = {}): SubagentsSett
     showCost: false,
     showModel: false,
     viewerMarkdown: "assistant",
+    backgroundShortcut: "ctrl+b",
     ...overrides,
   };
 }
@@ -198,6 +207,7 @@ describe("applySettings", () => {
     expect(appliers.setWidgetMode).toHaveBeenCalledWith("background");
     expect(appliers.setViewerMarkdown).toHaveBeenCalledWith("assistant");
     expect(appliers.setWorktreeCleanupPeriodDays).toHaveBeenCalledWith(30);
+    expect(appliers.setBackgroundShortcut).toHaveBeenCalledWith("ctrl+b");
   });
 
   // 0 is a real value here (unlimited), so `if (s.x)` truthiness would silently

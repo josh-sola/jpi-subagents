@@ -13,7 +13,7 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { defineTool, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext, getAgentDir, getSettingsListTheme } from "@earendil-works/pi-coding-agent";
-import { Container, Key, matchesKey, type SettingItem, SettingsList, Spacer, Text } from "@earendil-works/pi-tui";
+import { Container, isKeyRelease, Key, type KeyId, matchesKey, type SettingItem, SettingsList, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { abortable } from "./abortable.js";
 import { hasAgentBadge, renderAgentName } from "./agent-color.js";
@@ -27,6 +27,7 @@ import { loadCustomAgents } from "./custom-agents.js";
 import { wireFleetFooterProvider } from "./fleet-footer-bridge.js";
 import { GroupJoinManager } from "./group-join.js";
 import { isolationParam, resolveAgentInvocationConfig, resolveJoinMode } from "./invocation-config.js";
+import { resolveKeyId } from "./key-id.js";
 import { describeMention, handleBase, isReservedHandle, parseMention, resolveHandleToType, stripAgentPrefix } from "./mention.js";
 import { runMentionClone } from "./mention-clone.js";
 import { describeModel, type ModelRegistry, resolveModel } from "./model-resolver.js";
@@ -61,6 +62,9 @@ import { getWorktreeCleanupPeriodDays, isWorktreeIsolationEnabled, setWorktreeCl
 import { escapeXml } from "./xml.js";
 
 // ---- Shared helpers ----
+
+/** Default `background-shortcut` — also the fallback for an unparseable configured value. */
+const DEFAULT_BACKGROUND_SHORTCUT = "ctrl+b";
 
 /** Tool execute return value for a text response. */
 function textResult(msg: string, details?: AgentDetails) {
@@ -404,6 +408,12 @@ export default async function (pi: ExtensionAPI) {
     setViewerMarkdown(mode);
     void persistSettings(ctx, `Viewer markdown set to ${mode}`);
   }
+  /** Key that converts every currently-blocking top-level `Agent` call to background (ctrl+b). */
+  let backgroundShortcut = DEFAULT_BACKGROUND_SHORTCUT;
+  function getBackgroundShortcut(): string { return backgroundShortcut; }
+  function setBackgroundShortcut(keyId: string): void {
+    backgroundShortcut = resolveKeyId(keyId, DEFAULT_BACKGROUND_SHORTCUT);
+  }
   const pendingUsage = new PendingUsagePool();
 
   // ---- Cancellable pending notifications ----
@@ -729,6 +739,7 @@ export default async function (pi: ExtensionAPI) {
     if (ctx.hasUI) {
       widget.setUICtx(ctx.ui);
       fleet.setUICtx(ctx.ui as any);
+      registerBackgroundShortcut(ctx.ui as unknown as FleetUICtx);
       // Wired once per activation, like rpcHandle below: jpi-status (if present)
       // picks the rows up from here instead of the belowEditor widget.
       if (!fleetBridgeWired) {
@@ -1073,6 +1084,32 @@ export default async function (pi: ExtensionAPI) {
   function isFleetViewEnabled(): boolean { return fleetViewEnabled; }
   function setFleetViewEnabled(b: boolean): void { fleetViewEnabled = b; fleet.setEnabled(b); }
 
+  /**
+   * ctrl+b (configurable): convert every currently-blocking top-level `Agent`
+   * call into a background one. Only consumes the key when it actually detached
+   * something — otherwise the key must fall through untouched, since ctrl+b has
+   * no other meaning here and the editor may want it.
+   */
+  function handleBackgroundShortcut(data: string): { consume?: boolean } | undefined {
+    if (isKeyRelease(data)) return undefined;
+    if (!matchesKey(data, backgroundShortcut as KeyId)) return undefined;
+    const targets = manager.listBlockingAgents();
+    if (targets.length === 0) return undefined;
+    for (const record of targets) manager.detachBlocking(record.id);
+    widget.update();
+    fleet.update();
+    return { consume: true };
+  }
+  /** Re-registers only when handed a new `ui` — same idempotence as `fleet.setUICtx`. */
+  let backgroundShortcutUI: FleetUICtx | undefined;
+  let backgroundShortcutUnsub: (() => void) | undefined;
+  function registerBackgroundShortcut(ui: FleetUICtx): void {
+    if (ui === backgroundShortcutUI) return;
+    backgroundShortcutUnsub?.();
+    backgroundShortcutUI = ui;
+    backgroundShortcutUnsub = ui.onTerminalInput(handleBackgroundShortcut);
+  }
+
   // Claude Code-style `@handle message` prompt mentions. Read live by both the
   // `input` hook and the stacked autocomplete provider, so the toggle applies
   // immediately — the provider itself can never be unregistered (pi's wrapper
@@ -1263,6 +1300,7 @@ export default async function (pi: ExtensionAPI) {
   pi.on("tool_execution_start", async (_event, ctx) => {
     widget.setUICtx(ctx.ui as UICtx);
     fleet.setUICtx(ctx.ui as unknown as FleetUICtx);
+    registerBackgroundShortcut(ctx.ui as unknown as FleetUICtx);
     widget.onTurnStart();
   });
 
@@ -1332,6 +1370,7 @@ export default async function (pi: ExtensionAPI) {
     setShowCost,
     setShowModel,
     setViewerMarkdown,
+    setBackgroundShortcut,
   });
   pi.events.emit("subagents:settings_loaded", { settings: loadedSettings });
 
@@ -2023,6 +2062,7 @@ Terse command-style prompts produce shallow, generic work.
       streamUpdate();
 
       let record: AgentRecord;
+      let detached = false;
       try {
         const fgResult = await manager.spawnAndWait(pi, ctx, subagentType, params.prompt, {
           description: params.description,
@@ -2048,6 +2088,7 @@ Terse command-style prompts produce shallow, generic work.
           attachTranscript(fgRec, fgAgentId);
         });
         record = fgResult.record;
+        detached = fgResult.detached;
       } finally {
         // Runs on both paths, so a startup throw — which now propagates, see
         // the background spawn above (#179) — no longer leaves the spinner
@@ -2058,6 +2099,40 @@ Terse command-style prompts produce shallow, generic work.
           widget.markFinished(fgId);
           fleet.onAgentFinished(fgId);
         }
+      }
+
+      // ctrl+b fired mid-run: the call returns now, the run keeps going
+      // untouched, and its own completion notification fires later — the
+      // same enrollment a background spawn does at spawn time (toolCallId
+      // for notification linking, agentActivity + a cleared finished-age so
+      // the widget keeps showing it as a live background row).
+      if (detached) {
+        record.toolCallId = toolCallId;
+        if (fgId) {
+          agentActivity.set(fgId, fgState);
+          widget.markRunning(fgId);
+          widget.ensureTimer();
+          fleet.ensureTimer();
+        }
+        widget.update();
+        fleet.update();
+        return textResult(
+          `${fallbackNote}Agent moved to background.\n` +
+          `Agent ID: ${record.id}\n` +
+          `Type: ${displayName}\n` +
+          `Description: ${params.description}\n` +
+          (record.outputFile ? `Output file: ${record.outputFile}\n` : "") +
+          `\nYou will be notified when this agent completes.\n` +
+          `Use get_subagent_result to retrieve full results, or steer_subagent to send it messages.`,
+          {
+            ...detailBaseFor(record),
+            toolUses: fgState.toolUses,
+            tokens: formatLifetimeTokens(record),
+            durationMs: Date.now() - startedAt,
+            status: "background" as const,
+            agentId: record.id,
+          },
+        );
       }
 
       // Get final token count — from the record, like the cost below it, so the
@@ -2819,6 +2894,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
       showCost: isShowCostEnabled(),
       showModel: isShowModelEnabled(),
       viewerMarkdown: getViewerMarkdown(),
+      backgroundShortcut: getBackgroundShortcut(),
     } satisfies SubagentsSettings;
   }
 

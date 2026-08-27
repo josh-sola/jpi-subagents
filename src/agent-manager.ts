@@ -19,6 +19,7 @@ import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { abortable } from "./abortable.js";
 import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
 import { assignHandle, handleBase } from "./mention.js";
 import { describeModel } from "./model-resolver.js";
@@ -150,6 +151,14 @@ function occupiesForegroundSlot(
 
 /** Which concurrency pool a spawn is charged to, if any. */
 type Pool = "background" | "foreground";
+
+/**
+ * Rejection reason `spawnAndWait`'s internal detach `AbortController` aborts
+ * with. Private to this module — a caller could never construct one, so
+ * seeing it identifies the rejection unambiguously as a `detachBlocking()`
+ * call rather than a caller-supplied `options.signal` abort or a real error.
+ */
+const DETACH_MARKER = Symbol("subagent-detach");
 
 interface SpawnArgs {
   pi: ExtensionAPI;
@@ -364,6 +373,14 @@ export class AgentManager {
   private startups = new Map<string, Promise<void>>();
 
   /**
+   * One entry per in-flight `spawnAndWait` call, keyed by agent id — present
+   * only while a caller is actually blocked on that record (queued or
+   * running). `detachBlocking` aborts the entry it finds here to release the
+   * waiter; its absence is also how the method reports "nothing to detach".
+   */
+  private blockingWaits = new Map<string, AbortController>();
+
+  /**
    * Evicted agents that can still be reached by name, keyed by handle. Outlives
    * the 10-minute record cleanup — that timer exists to bound memory, not to
    * expire a conversation the user might still want — and is cleared alongside
@@ -538,7 +555,7 @@ export class AgentManager {
       record.status = "queued";
       // A queued record never reaches startAgent's signal wiring, so arm the
       // parent abort here or Esc could not release the position.
-      if (!this.armQueuedAbort(id, options.signal)) return id;
+      if (!this.armQueuedAbort(id, record, options.signal)) return id;
       let release!: () => void;
       record.startGate = new Promise<void>(resolve => { release = resolve; });
       this.queue.push({
@@ -565,22 +582,23 @@ export class AgentManager {
    * an aborted signal, so a `spawnAndWait` on it would wait forever — pi has no
    * tool-execution timeout to bail it out.
    *
-   * The listener is left in place when the agent starts. `startAgent` adds its
-   * own, so both fire on a later abort, but `abort()` on an already-stopped
-   * record is a no-op — so detaching would only be tidiness, and tidiness the
-   * `abortAll`/`dispose` paths could not offer anyway.
+   * The listener is left in place when the agent starts — `startAgent` adds its
+   * own, so both fire on a later abort — UNLESS `detachBlocking` removed it
+   * first. Without that removable reference, a ctrl+b detach of a still-QUEUED
+   * agent would strip `startAgent`'s later listener but leave this one wired,
+   * so the agent it just detached would still die on the next Esc once it
+   * started running.
    */
-  private armQueuedAbort(id: string, signal?: AbortSignal): boolean {
+  private armQueuedAbort(id: string, record: AgentRecord, signal?: AbortSignal): boolean {
     if (signal === undefined) return true;
     if (signal.aborted) {
-      const record = this.agents.get(id);
-      if (record) {
-        record.status = "stopped";
-        record.completedAt = Date.now();
-      }
+      record.status = "stopped";
+      record.completedAt = Date.now();
       return false;
     }
-    signal.addEventListener("abort", () => this.abort(id), { once: true });
+    const onAbort = () => this.abort(id);
+    signal.addEventListener("abort", onAbort, { once: true });
+    record.detachAbortListener = () => signal.removeEventListener("abort", onAbort);
     return true;
   }
 
@@ -721,9 +739,12 @@ export class AgentManager {
 
     this.onStart?.(record);
 
-    // Wire parent abort signal to stop the subagent when the parent is interrupted
+    // Wire parent abort signal to stop the subagent when the parent is interrupted.
+    // Skipped when `record.blocking` is explicitly false: that only happens when
+    // `detachBlocking` fired while this spawn was still queued, and re-wiring the
+    // kill switch here would undo the detach the moment the queue starts it.
     let detachParentSignal: (() => void) | undefined;
-    if (options.signal) {
+    if (options.signal && record.blocking !== false) {
       // A queued spawn can start minutes after the caller handed us its signal,
       // by which time it may already be aborted — and `addEventListener` would
       // never fire, leaving a child the parent can no longer reach.
@@ -735,6 +756,13 @@ export class AgentManager {
       }
     }
     const detach = () => { detachParentSignal?.(); detachParentSignal = undefined; };
+    // Compose with, rather than overwrite, whatever `armQueuedAbort` left here:
+    // for a spawn that just left the queue, that is a SEPARATE listener on the
+    // same signal, still attached. Dropping it would leave it live forever —
+    // including past a later `detachBlocking`, which needs one call to strip
+    // every listener this record has ever armed.
+    const detachQueuedListener = record.detachAbortListener;
+    record.detachAbortListener = () => { detachQueuedListener?.(); detach(); };
 
     const promise = runAgent(ctx, type, prompt, {
       pi,
@@ -1013,7 +1041,9 @@ export class AgentManager {
    * Spawn an agent and wait for completion (foreground use).
    * Charged to the foreground pool (`maxConcurrentForeground`), which is
    * unlimited by default; never to the background one.
-   * Returns { id, record } so callers can access the agent ID.
+   * Returns `{ id, record, detached: false }` on a normal finish, or
+   * `{ id, record, detached: true }` when `detachBlocking` released this wait
+   * early — the run itself keeps going untouched.
    *
    * @param onSpawned - Called synchronously once the run is kicked off, before
    *   onSessionCreated fires. Use this to set record.outputFile so
@@ -1026,7 +1056,7 @@ export class AgentManager {
     prompt: string,
     options: Omit<SpawnOptions, "isBackground">,
     onSpawned?: (id: string) => void,
-  ): Promise<{ id: string; record: AgentRecord }> {
+  ): Promise<{ id: string; record: AgentRecord; detached: boolean }> {
     // `blocking` is what maxConcurrentForeground bounds, and this is its only
     // source. onSpawned rides on the options rather than on a field of this
     // manager: a queued spawn starts at drain time, long after any install/
@@ -1040,34 +1070,97 @@ export class AgentManager {
     });
     const record = this.agents.get(id)!;
 
-    // Queued: nothing to await yet — the promise appears when the drain starts
-    // it. The gate resolves (never rejects) on every path out of the queue,
-    // start and abort alike, so a rejection can never escape into the caller's
-    // tool `execute` and take down pi's whole Promise.all tool batch.
-    if (record.status === "queued") await record.startGate;
+    // Own controller per call, not per agent: it exists only to let
+    // `detachBlocking` release THIS wait, distinct from the record's own
+    // `abortController`, which stops the run itself.
+    const detachController = new AbortController();
+    this.blockingWaits.set(id, detachController);
 
-    // The run promise only exists once startup is past its awaited repo copy —
-    // without this the call would return before the agent had started at all.
-    // A startup failure (strict worktree isolation) rejects here, which is what
-    // the immediate path owes its caller: pi only marks a tool result failed
-    // when `execute` throws. A queued spawn's failure landed on the record
-    // instead (nobody was awaiting `startups` at drain time) and is rethrown
-    // below, so the contract is the same either way.
-    await this.awaitStartup(id);
+    try {
+      // Queued: nothing to await yet — the promise appears when the drain starts
+      // it. The gate resolves (never rejects) on every path out of the queue,
+      // start and abort alike, so a rejection can never escape into the caller's
+      // tool `execute` and take down pi's whole Promise.all tool batch. Wrapped
+      // in `abortable` so a ctrl+b detach works even before the agent starts.
+      if (record.status === "queued") {
+        try {
+          await abortable(record.startGate!, detachController.signal);
+        } catch (err) {
+          if (err === DETACH_MARKER) return { id, record, detached: true };
+          throw err;
+        }
+      }
 
-    // undefined when it was aborted while queued, or stopped mid-copy, and so
-    // never ran — the record is already terminal with a completedAt, which is
-    // what the caller renders.
-    if (record.promise) await record.promise;
+      // The run promise only exists once startup is past its awaited repo copy —
+      // without this the call would return before the agent had started at all.
+      // A startup failure (strict worktree isolation) rejects here, which is what
+      // the immediate path owes its caller: pi only marks a tool result failed
+      // when `execute` throws. A queued spawn's failure landed on the record
+      // instead (nobody was awaiting `startups` at drain time) and is rethrown
+      // below, so the contract is the same either way.
+      await this.awaitStartup(id);
 
-    // A record that ended "error" without ever getting a promise never ran: the
-    // same startup failure spawn() rethrows on the immediate path (#179). Keep
-    // one contract rather than letting queue pressure decide whether a strict
-    // worktree failure throws or returns as a result.
-    if (record.promise === undefined && record.status === "error") {
-      throw new Error(record.error ?? "Agent failed to start");
+      // undefined when it was aborted while queued, or stopped mid-copy, and so
+      // never ran — the record is already terminal with a completedAt, which is
+      // what the caller renders.
+      if (record.promise) {
+        try {
+          await abortable(record.promise, detachController.signal);
+        } catch (err) {
+          if (err === DETACH_MARKER) return { id, record, detached: true };
+          throw err;
+        }
+      }
+
+      // A record that ended "error" without ever getting a promise never ran: the
+      // same startup failure spawn() rethrows on the immediate path (#179). Keep
+      // one contract rather than letting queue pressure decide whether a strict
+      // worktree failure throws or returns as a result.
+      if (record.promise === undefined && record.status === "error") {
+        throw new Error(record.error ?? "Agent failed to start");
+      }
+      return { id, record, detached: false };
+    } finally {
+      this.blockingWaits.delete(id);
     }
-    return { id, record };
+  }
+
+  /**
+   * Detach a caller currently blocked in `spawnAndWait` on `id` (ctrl+b):
+   * releases the wait early and converts the record to a background one so
+   * its normal completion notification fires later. The run itself is
+   * untouched — only the caller's inline wait ends.
+   *
+   * Returns false when nobody is currently blocked on `id` — an unknown id, or
+   * a record that has already settled or was detached once already. Works on
+   * a nested child's blocking wait too; callers that must stay top-level (the
+   * ctrl+b shortcut) filter with `listBlockingAgents()` first.
+   */
+  detachBlocking(id: string): boolean {
+    const controller = this.blockingWaits.get(id);
+    const record = this.agents.get(id);
+    if (!controller || !record) return false;
+
+    record.blocking = false;
+    record.isBackground = true;
+    // Must run before the abort below: once the caller's wait ends, nothing
+    // else guarantees this runs before the agent's next turn, and a stray
+    // Esc in that window would still kill a "detached" agent.
+    record.detachAbortListener?.();
+    record.detachAbortListener = undefined;
+
+    controller.abort(DETACH_MARKER);
+    return true;
+  }
+
+  /** Top-level records a caller is currently blocked on inline — what ctrl+b can detach. */
+  listBlockingAgents(): AgentRecord[] {
+    const records: AgentRecord[] = [];
+    for (const id of this.blockingWaits.keys()) {
+      const record = this.agents.get(id);
+      if (record && isTopLevelAgent(record)) records.push(record);
+    }
+    return records;
   }
 
   /**

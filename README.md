@@ -449,7 +449,7 @@ There are two independent pools.
 
 **Background** (`maxConcurrent`, default 10). Excess agents are automatically queued and start as running agents complete. The widget shows queued agents as a collapsed count. Since agents run in the background by default, nearly every spawn takes a slot; the limit was raised from 4 so that ordinary parallel fan-outs don't queue.
 
-**Foreground** (`maxConcurrentForeground`, default `0` = unlimited). Off by default, so nothing changes unless you set it. pi dispatches a message's tool calls through `Promise.all`, so several `Agent` calls with `run_in_background: false` in one message have always started at once — this bounds that. Useful mainly with local models, where parallel agents thrash the prompt cache ([#253](https://github.com/tintinweb/pi-subagents/issues/253)). A queued foreground agent appears in `/agents → Running agents` as `queued` and can be stopped there; its `Agent` call says so while it waits and then returns its result normally.
+**Foreground** (`maxConcurrentForeground`, default `0` = unlimited). Off by default, so nothing changes unless you set it. pi dispatches a message's tool calls through `Promise.all`, so several `Agent` calls with `run_in_background: false` in one message have always started at once — this bounds that. Useful mainly with local models, where parallel agents thrash the prompt cache ([#253](https://github.com/tintinweb/pi-subagents/issues/253)). A queued foreground agent appears in `/agents → Running agents` as `queued` and can be stopped there; its `Agent` call says so while it waits and then returns its result normally. Changed your mind about waiting on one? Press `ctrl+b` (see [Background shortcut](#persistent-settings)) to move it to the background instead of stopping it — the run keeps going and notifies you when it's done.
 
 The two are deliberately **not** one limit. A foreground agent blocks the parent anyway — the parent could have done that work itself without paying a slot — so charging it to the background pool would let a saturated pool starve the main session.
 
@@ -597,6 +597,8 @@ EOF
 ```
 
 Every project now starts with concurrency 16 and grace 10, without ever touching the menu. Individual settings can still be changed via `/agents` → Settings.
+
+**Background shortcut** (`background-shortcut`, default `"ctrl+b"`): the key that moves every currently-blocking top-level `Agent` call to the background. Press it while one or more `run_in_background: false` calls are still running or queued and each returns immediately with its agent ID, exactly as if it had been spawned in the background — the run itself keeps going untouched, and its normal completion notification arrives later (`get_subagent_result` also works on it in the meantime). Does nothing, and the key passes through to the editor as usual, when nothing is currently blocking. Nested agents are unaffected — only top-level calls can be converted. Hand-edit the `subagents { }` jpi.kdl section to change it; there's no `/agents → Settings` row for it. An unparseable value falls back to `"ctrl+b"` rather than disabling the shortcut.
 
 **Failure behavior:** a missing jpi.kdl is created with defaults on first load; a parse error or an invalid field value is reported as an issue (logged to stderr) and that value falls back to its default; write failures downgrade the `/agents` toast to a warning with `(session only; failed to persist)`.
 
