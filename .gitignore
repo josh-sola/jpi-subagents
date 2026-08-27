@@ -39,3 +39,6 @@ test/perf/.results/
 # Pi internal files
 progress.md
 CLAUDE.md
+
+# Installs float within declared ranges; no lockfile is committed
+package-lock.json
